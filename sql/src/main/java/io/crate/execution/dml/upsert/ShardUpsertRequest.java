@@ -29,6 +29,7 @@ import io.crate.expression.symbol.Symbol;
 import io.crate.expression.symbol.Symbols;
 import io.crate.metadata.Reference;
 import io.crate.metadata.doc.DocSysColumns;
+import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.action.support.replication.ReplicationRequest;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.StreamInput;
@@ -74,7 +75,7 @@ public class ShardUpsertRequest extends ShardRequest<ShardUpsertRequest, ShardUp
     @Nullable
     private Streamer[] insertValuesStreamer;
 
-    public ShardUpsertRequest() {
+    ShardUpsertRequest() {
     }
 
     private ShardUpsertRequest(ShardId shardId,
@@ -94,44 +95,45 @@ public class ShardUpsertRequest extends ShardRequest<ShardUpsertRequest, ShardUp
         }
     }
 
-    public String[] updateColumns() {
+    String[] updateColumns() {
         return updateColumns;
     }
 
     @Nullable
-    public Reference[] insertColumns() {
+    Reference[] insertColumns() {
         return insertColumns;
     }
 
-    public DuplicateKeyAction duplicateKeyAction() {
+    DuplicateKeyAction duplicateKeyAction() {
         return duplicateKeyAction;
     }
 
-    public ShardUpsertRequest duplicateKeyAction(DuplicateKeyAction duplicateKeyAction) {
+    private ShardUpsertRequest duplicateKeyAction(DuplicateKeyAction duplicateKeyAction) {
         this.duplicateKeyAction = duplicateKeyAction;
         return this;
     }
 
-    public boolean continueOnError() {
+    boolean continueOnError() {
         return continueOnError;
     }
 
-    public ShardUpsertRequest continueOnError(boolean continueOnError) {
+    private ShardUpsertRequest continueOnError(boolean continueOnError) {
         this.continueOnError = continueOnError;
         return this;
     }
 
-    public boolean validateConstraints() {
+    boolean validateConstraints() {
         return validateConstraints;
     }
 
-    public ShardUpsertRequest validateConstraints(boolean validateConstraints) {
+    ShardUpsertRequest validateConstraints(boolean validateConstraints) {
         this.validateConstraints = validateConstraints;
         return this;
     }
 
-    public Boolean isRawSourceInsert() {
+    Boolean isRawSourceInsert() {
         if (isRawSourceInsert == null) {
+            assert insertColumns != null : "insertColumns must not be NULL on insert requests";
             isRawSourceInsert =
                 insertColumns.length == 1 && insertColumns[0].column().equals(DocSysColumns.RAW);
         }
@@ -253,16 +255,59 @@ public class ShardUpsertRequest extends ShardRequest<ShardUpsertRequest, ShardUp
         @Nullable
         private Object[] insertValues;
 
+        /**
+         * The URI the item was read from.
+         * It is only needed ony the sender to merge the write response into the related result object.
+         * DO NOT STREAM!
+         */
+        @Nullable
+        private BytesRef sourceUri;
+
+        /**
+         * A possible failure while reading the item.
+         * It is only needed ony the sender to merge the write response into the related result object.
+         * DO NOT STREAM!
+         */
+        @Nullable
+        private String readFailure;
+
+        /**
+         * A possible failure processing the source URI.
+         * It is only needed ony the sender to merge the write response into the related result object.
+         * DO NOT STREAM!
+         */
+        @Nullable
+        private String sourceUriFailure;
+
         public Item(String id,
                     @Nullable Symbol[] updateAssignments,
                     @Nullable Object[] insertValues,
                     @Nullable Long version) {
+            this(id, updateAssignments, insertValues, version, null);
+        }
+
+        public Item(String readFailure, @Nullable BytesRef sourceUri) {
+            this("failed", null, null, null, sourceUri);
+            this.readFailure = readFailure;
+        }
+
+        public Item(BytesRef sourceUri, String sourceUriFailure) {
+            this("failed", null, null, null, sourceUri);
+            this.sourceUriFailure = sourceUriFailure;
+        }
+
+        public Item(String id,
+                    @Nullable Symbol[] updateAssignments,
+                    @Nullable Object[] insertValues,
+                    @Nullable Long version,
+                    @Nullable BytesRef sourceUri) {
             super(id);
             this.updateAssignments = updateAssignments;
             if (version != null) {
                 this.version = version;
             }
             this.insertValues = insertValues;
+            this.sourceUri = sourceUri;
         }
 
         @Nullable
@@ -274,18 +319,32 @@ public class ShardUpsertRequest extends ShardRequest<ShardUpsertRequest, ShardUp
             this.source = source;
         }
 
-        public boolean retryOnConflict() {
+        boolean retryOnConflict() {
             return version == Versions.MATCH_ANY;
         }
 
         @Nullable
-        public Symbol[] updateAssignments() {
+        Symbol[] updateAssignments() {
             return updateAssignments;
         }
 
         @Nullable
         public Object[] insertValues() {
             return insertValues;
+        }
+
+        @Nullable
+        public BytesRef sourceUri() {
+            return sourceUri;
+        }
+
+        @Nullable
+        public String readFailure() {
+            return readFailure;
+        }
+
+        public String sourceUriFailure() {
+            return sourceUriFailure;
         }
 
         public Item(StreamInput in, @Nullable Streamer[] insertValueStreamers) throws IOException {

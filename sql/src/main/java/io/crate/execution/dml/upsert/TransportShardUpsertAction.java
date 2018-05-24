@@ -29,6 +29,7 @@ import io.crate.analyze.ConstraintsValidator;
 import io.crate.data.ArrayRow;
 import io.crate.data.Input;
 import io.crate.data.Row;
+import io.crate.exceptions.SQLExceptions;
 import io.crate.execution.ddl.SchemaUpdateClient;
 import io.crate.execution.dml.ShardResponse;
 import io.crate.execution.dml.TransportShardAction;
@@ -188,7 +189,7 @@ public class TransportShardUpsertAction extends TransportShardAction<ShardUpsert
                 shardResponse.add(location,
                     new ShardResponse.Failure(
                         item.id(),
-                        userFriendlyMessage(e),
+                        userFriendlyMessage(SQLExceptions.esToCrateException(e)),
                         (e instanceof VersionConflictEngineException)));
             }
         }

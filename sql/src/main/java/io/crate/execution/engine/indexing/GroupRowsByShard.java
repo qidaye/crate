@@ -22,6 +22,7 @@
 
 package io.crate.execution.engine.indexing;
 
+import io.crate.data.Input;
 import io.crate.data.Row;
 import io.crate.execution.dml.ShardRequest;
 import io.crate.execution.engine.collect.CollectExpression;
@@ -49,16 +50,24 @@ public final class GroupRowsByShard<TReq extends ShardRequest<TReq, TItem>, TIte
 
     private final RowShardResolver rowShardResolver;
     private final List<? extends CollectExpression<Row, ?>> expressions;
+    private final List<? extends CollectExpression<Row, ?>> sourceInfoExpressions;
     private final Function<String, TItem> itemFactory;
+    private final Function<String, TItem> itemFailureFactory;
+    private final Function<String, TItem> sourceUriFailureFactory;
     private final Supplier<String> indexNameResolver;
     private final ClusterService clusterService;
     private final boolean autoCreateIndices;
+    private final Input<String> sourceUriFailureInput;
 
     GroupRowsByShard(ClusterService clusterService,
                      RowShardResolver rowShardResolver,
                      Supplier<String> indexNameResolver,
                      List<? extends CollectExpression<Row, ?>> expressions,
+                     List<? extends CollectExpression<Row, ?>> sourceInfoExpressions,
                      Function<String, TItem> itemFactory,
+                     Function<String, TItem> itemFailureFactory,
+                     Function<String, TItem> sourceUriFailureFactory,
+                     Input<String> sourceUriFailureInput,
                      boolean autoCreateIndices) {
         assert expressions instanceof RandomAccess
             : "expressions should be a RandomAccess list for zero allocation iterations";
@@ -67,25 +76,53 @@ public final class GroupRowsByShard<TReq extends ShardRequest<TReq, TItem>, TIte
         this.rowShardResolver = rowShardResolver;
         this.indexNameResolver = indexNameResolver;
         this.expressions = expressions;
+        this.sourceInfoExpressions = sourceInfoExpressions;
         this.itemFactory = itemFactory;
+        this.itemFailureFactory = itemFailureFactory;
+        this.sourceUriFailureFactory = sourceUriFailureFactory;
+        this.sourceUriFailureInput = sourceUriFailureInput;
         this.autoCreateIndices = autoCreateIndices;
     }
 
     @Override
     public void accept(ShardedRequests<TReq, TItem> shardedRequests, Row row) {
-        rowShardResolver.setNextRow(row);
-        for (int i = 0; i < expressions.size(); i++) {
-            expressions.get(i).setNextRow(row);
+        for (int i = 0; i < sourceInfoExpressions.size(); i++) {
+            sourceInfoExpressions.get(i).setNextRow(row);
         }
-        String id = rowShardResolver.id();
-        TItem item = itemFactory.apply(id);
-        String indexName = indexNameResolver.get();
-        String routing = rowShardResolver.routing();
-        ShardLocation shardLocation = getShardLocation(indexName, id, routing);
-        if (shardLocation == null) {
-            shardedRequests.add(item, indexName, routing);
-        } else {
-            shardedRequests.add(item, shardLocation);
+
+        String sourceUriFailure = sourceUriFailureInput.value();
+        if (sourceUriFailure != null) {
+            TItem item = sourceUriFailureFactory.apply(sourceUriFailure);
+            addFailure(shardedRequests, item);
+            return;
+        }
+
+
+        try {
+            rowShardResolver.setNextRow(row);
+            for (int i = 0; i < expressions.size(); i++) {
+                expressions.get(i).setNextRow(row);
+            }
+
+            String id = rowShardResolver.id();
+            TItem item = itemFactory.apply(id);
+            String indexName = indexNameResolver.get();
+            String routing = rowShardResolver.routing();
+            ShardLocation shardLocation = getShardLocation(indexName, id, routing);
+            if (shardLocation == null) {
+                shardedRequests.add(item, indexName, routing);
+            } else {
+                shardedRequests.add(item, shardLocation);
+            }
+        } catch (Throwable t) {
+            TItem item = itemFailureFactory.apply(t.getMessage());
+            addFailure(shardedRequests, item);
+        }
+    }
+
+    private void addFailure(ShardedRequests<TReq, TItem> shardedRequests, TItem item) {
+        if (item != null) {
+            shardedRequests.addFailed(item);
         }
     }
 

@@ -176,7 +176,7 @@ public class SQLExceptions {
         return new SQLActionException(message, errorCode, httpStatus, e.getStackTrace());
     }
 
-    private static Throwable esToCrateException(Throwable e) {
+    public static Throwable esToCrateException(Throwable e) {
         e = SQLExceptions.unwrap(e);
 
         if (e instanceof IllegalArgumentException || e instanceof ParsingException) {

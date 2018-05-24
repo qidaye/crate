@@ -43,6 +43,7 @@ import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.settings.Settings;
 
 import javax.annotation.Nullable;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -112,13 +113,18 @@ public class ColumnIndexWriterProjector implements Projector {
             jobId,
             rowShardResolver,
             itemFactory,
+            (t) -> null,
+            (t) -> null,
             builder::newRequest,
             collectExpressions,
+            Collections.emptyList(),
+            () -> null,
             indexNameResolver,
             autoCreateIndices,
             transportActionProvider.transportShardUpsertAction()::execute,
             transportActionProvider.transportBulkCreateIndicesAction(),
-            tableSettings
+            tableSettings,
+            UpsertResultCollectors.newRowCountCollector()
         );
     }
 

@@ -22,17 +22,17 @@
 
 package io.crate.execution.engine.indexing;
 
-import io.crate.execution.dml.upsert.ShardUpsertRequest.DuplicateKeyAction;
-import io.crate.expression.symbol.Symbol;
 import io.crate.data.BatchIterator;
 import io.crate.data.CollectingBatchIterator;
 import io.crate.data.Input;
 import io.crate.data.Projector;
 import io.crate.data.Row;
 import io.crate.execution.dml.upsert.ShardUpsertRequest;
+import io.crate.execution.dml.upsert.ShardUpsertRequest.DuplicateKeyAction;
 import io.crate.execution.engine.collect.CollectExpression;
 import io.crate.execution.engine.collect.RowShardResolver;
 import io.crate.execution.jobs.NodeJobsCounter;
+import io.crate.expression.symbol.Symbol;
 import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.Functions;
 import io.crate.metadata.Reference;
@@ -59,6 +59,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collector;
 
 public class IndexWriterProjector implements Projector {
 
@@ -80,13 +81,17 @@ public class IndexWriterProjector implements Projector {
                                 @Nullable Symbol routingSymbol,
                                 ColumnIdent clusteredByColumn,
                                 Input<?> sourceInput,
+                                Input<?> sourceUriInput,
+                                Input<String> sourceUriFailureInput,
                                 List<? extends CollectExpression<Row, ?>> collectExpressions,
+                                List<? extends CollectExpression<Row, ?>> collectSourceInfoExpressions,
                                 int bulkActions,
                                 @Nullable String[] includes,
                                 @Nullable String[] excludes,
                                 boolean autoCreateIndices,
                                 boolean overwriteDuplicates,
-                                UUID jobId) {
+                                UUID jobId,
+                                Collector<ShardUpsertRequestAndResponse, UpsertResults, Iterable<Row>> resultCollector) {
         Input<BytesRef> source;
         if (includes == null && excludes == null) {
             //noinspection unchecked
@@ -105,8 +110,20 @@ public class IndexWriterProjector implements Projector {
             jobId,
             false);
 
+        //noinspection unchecked
+        Input<BytesRef> sourceUri = (Input<BytesRef>) sourceUriInput;
+
         Function<String, ShardUpsertRequest.Item> itemFactory = id ->
-            new ShardUpsertRequest.Item(id, null, new Object[]{source.value()}, null);
+            new ShardUpsertRequest.Item(id, null, new Object[]{source.value()}, null, sourceUri.value());
+
+        Function<String, ShardUpsertRequest.Item> itemFailureFactory = ignored -> null;
+        Function<String, ShardUpsertRequest.Item> sourceUriFailureFactory = ignored -> null;
+        if (collectSourceInfoExpressions.isEmpty() == false) {
+            itemFailureFactory = readFailure ->
+                new ShardUpsertRequest.Item(readFailure, sourceUri.value());
+            sourceUriFailureFactory = sourceUriFailure ->
+                new ShardUpsertRequest.Item(sourceUri.value(), sourceUriFailure);
+        }
 
         shardingUpsertExecutor = new ShardingUpsertExecutor(
             clusterService,
@@ -117,13 +134,18 @@ public class IndexWriterProjector implements Projector {
             jobId,
             rowShardResolver,
             itemFactory,
+            itemFailureFactory,
+            sourceUriFailureFactory,
             builder::newRequest,
             collectExpressions,
+            collectSourceInfoExpressions,
+            sourceUriFailureInput,
             indexNameResolver,
             autoCreateIndices,
             shardUpsertAction,
             transportCreatePartitionsAction,
-            tableSettings
+            tableSettings,
+            resultCollector
         );
     }
 

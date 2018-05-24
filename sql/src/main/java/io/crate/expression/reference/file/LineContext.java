@@ -23,32 +23,40 @@ package io.crate.expression.reference.file;
 
 import io.crate.metadata.ColumnIdent;
 import org.apache.lucene.util.BytesRef;
+import org.elasticsearch.ElasticsearchParseException;
 import org.elasticsearch.common.bytes.BytesArray;
+import org.elasticsearch.common.compress.NotXContentException;
+import org.elasticsearch.common.lucene.BytesRefs;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.common.xcontent.XContentType;
 
 import javax.annotation.Nullable;
+import java.net.URI;
 import java.util.Map;
 
 public class LineContext {
 
     private byte[] rawSource;
     private Map<String, Object> parsedSource;
+    private BytesRef currentUri;
+    private String currentUriFailure;
 
     @Nullable
-    public BytesRef sourceAsBytesRef() {
+    BytesRef sourceAsBytesRef() {
         if (rawSource != null) {
             return new BytesRef(rawSource);
         }
         return null;
     }
 
-    public Map<String, Object> sourceAsMap() {
+    Map<String, Object> sourceAsMap() {
         if (parsedSource == null) {
             try {
                 parsedSource = XContentHelper.convertToMap(new BytesArray(rawSource), false, XContentType.JSON).v2();
             } catch (NullPointerException e) {
                 return null;
+            } catch (ElasticsearchParseException | NotXContentException e) {
+                throw new RuntimeException("JSON parser error: " + e.getMessage(), e);
             }
         }
         return parsedSource;
@@ -69,5 +77,24 @@ public class LineContext {
     public void rawSource(byte[] bytes) {
         this.rawSource = bytes;
         this.parsedSource = null;
+    }
+
+    public void currentUri(URI currentUri) {
+        this.currentUri = BytesRefs.toBytesRef(currentUri.toString());
+        // reset failure if new URI is processed
+        setCurrentUriFailure(null);
+    }
+
+    BytesRef currentUri() {
+        return currentUri;
+    }
+
+    public void setCurrentUriFailure(@Nullable String failureMessage) {
+        currentUriFailure = failureMessage;
+    }
+
+    @Nullable
+    public String getCurrentUriFailure() {
+        return currentUriFailure;
     }
 }

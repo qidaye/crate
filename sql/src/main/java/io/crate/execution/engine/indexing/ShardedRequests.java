@@ -34,6 +34,7 @@ import java.util.function.Function;
 public final class ShardedRequests<TReq extends ShardRequest<TReq, TItem>, TItem extends ShardRequest.Item> {
 
     final Map<String, List<ItemAndRouting<TItem>>> itemsByMissingIndex = new HashMap<>();
+    final List<TItem> itemsWithFailure = new ArrayList<>();
     final Map<ShardLocation, TReq> itemsByShard = new HashMap<>();
 
     private final Function<ShardId, TReq> requestFactory;
@@ -60,6 +61,10 @@ public final class ShardedRequests<TReq extends ShardRequest<TReq, TItem>, TItem
         }
         location++;
         req.add(location, item);
+    }
+
+    public void addFailed(TItem item) {
+        itemsWithFailure.add(item);
     }
 
     static class ItemAndRouting<TItem> {

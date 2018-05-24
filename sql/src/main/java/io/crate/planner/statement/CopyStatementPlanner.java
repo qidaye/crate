@@ -25,12 +25,14 @@ package io.crate.planner.statement;
 import com.carrotsearch.hppc.cursors.ObjectCursor;
 import com.google.common.annotations.VisibleForTesting;
 import io.crate.analyze.CopyFromAnalyzedStatement;
+import io.crate.analyze.CopyFromReturnAnalyzedStatement;
 import io.crate.analyze.CopyToAnalyzedStatement;
 import io.crate.collections.Lists2;
 import io.crate.data.Row;
 import io.crate.data.RowConsumer;
 import io.crate.execution.dsl.phases.FileUriCollectPhase;
 import io.crate.execution.dsl.phases.NodeOperationTree;
+import io.crate.execution.dsl.projection.AbstractIndexWriterProjection;
 import io.crate.execution.dsl.projection.MergeCountProjection;
 import io.crate.execution.dsl.projection.Projection;
 import io.crate.execution.dsl.projection.SourceIndexWriterProjection;
@@ -39,6 +41,8 @@ import io.crate.execution.dsl.projection.builder.InputColumns;
 import io.crate.execution.dsl.projection.builder.ProjectionBuilder;
 import io.crate.execution.engine.NodeOperationTreeGenerator;
 import io.crate.execution.engine.pipeline.TopN;
+import io.crate.expression.reference.file.CurrentUriLineExpression;
+import io.crate.expression.reference.file.UriFailureExpression;
 import io.crate.expression.symbol.InputColumn;
 import io.crate.expression.symbol.Literal;
 import io.crate.expression.symbol.Symbol;
@@ -46,6 +50,8 @@ import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.GeneratedReference;
 import io.crate.metadata.PartitionName;
 import io.crate.metadata.Reference;
+import io.crate.metadata.ReferenceIdent;
+import io.crate.metadata.RowGranularity;
 import io.crate.metadata.doc.DocSysColumns;
 import io.crate.metadata.doc.DocTableInfo;
 import io.crate.planner.DependencyCarrier;
@@ -59,6 +65,7 @@ import io.crate.planner.node.dql.Collect;
 import io.crate.planner.operators.LogicalPlan;
 import io.crate.planner.operators.LogicalPlanner;
 import io.crate.planner.operators.SubQueryResults;
+import io.crate.types.DataTypes;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
@@ -177,10 +184,31 @@ public final class CopyStatementPlanner {
             clusteredBy == null ? null : table.getReference(clusteredBy)
         );
         Reference rawOrDoc = rawOrDoc(table, partitionIdent);
-        int rawOrDocIdx = toCollect.size();
+        final int rawOrDocIdx = toCollect.size();
         toCollect.add(rawOrDoc);
+
+        List<? extends Symbol> projectionOutputs = AbstractIndexWriterProjection.OUTPUTS;
+        boolean isReturnSummary = copyFrom instanceof CopyFromReturnAnalyzedStatement;
+        InputColumn sourceUriSymbol = null;
+        InputColumn sourceUriFailureSymbol = null;
+        if (isReturnSummary) {
+            sourceUriSymbol = new InputColumn(toCollect.size(), DataTypes.STRING);
+            toCollect.add(new Reference(
+                new ReferenceIdent(table.ident(), new ColumnIdent(CurrentUriLineExpression.COLUMN_NAME)),
+                RowGranularity.DOC,
+                DataTypes.STRING));
+
+            sourceUriFailureSymbol = new InputColumn(toCollect.size(), DataTypes.STRING);
+            toCollect.add(new Reference(
+                new ReferenceIdent(table.ident(), new ColumnIdent(UriFailureExpression.COLUMN_NAME)),
+                RowGranularity.DOC,
+                DataTypes.STRING));
+
+            projectionOutputs = ((CopyFromReturnAnalyzedStatement) copyFrom).fields();
+        }
+
         String[] excludes = partitionedByNames.size() > 0
-            ? partitionedByNames.toArray(new String[partitionedByNames.size()]) : null;
+            ? partitionedByNames.toArray(new String[0]) : null;
 
         InputColumns.SourceSymbols sourceSymbols = new InputColumns.SourceSymbols(toCollect);
         Symbol clusteredByInputCol = null;
@@ -200,14 +228,18 @@ public final class CopyStatementPlanner {
             excludes,
             InputColumns.create(primaryKeyRefs, sourceSymbols),
             clusteredByInputCol,
+            sourceUriSymbol,
+            sourceUriFailureSymbol,
+            projectionOutputs,
             table.isPartitioned() // autoCreateIndices
         );
-        List<Projection> projections = Collections.singletonList(sourceIndexWriterProjection);
 
         // if there are partitionValues (we've had a PARTITION clause in the statement)
         // we need to use the calculated partition values because the partition columns are likely NOT in the data being read
         // the partitionedBy-inputColumns created for the projection are still valid because the positions are not changed
-        rewriteToCollectToUsePartitionValues(table.partitionedByColumns(), partitionValues, toCollect);
+        if (partitionValues != null) {
+            rewriteToCollectToUsePartitionValues(table.partitionedByColumns(), partitionValues, toCollect);
+        }
 
         FileUriCollectPhase collectPhase = new FileUriCollectPhase(
             context.jobId(),
@@ -216,14 +248,23 @@ public final class CopyStatementPlanner {
             getExecutionNodes(allNodes, copyFrom.settings().getAsInt("num_readers", allNodes.getSize()), copyFrom.nodePredicate()),
             copyFrom.uri(),
             toCollect,
-            projections,
+            Collections.emptyList(),
             copyFrom.settings().get("compression", null),
             copyFrom.settings().getAsBoolean("shared", null),
             copyFrom.inputFormat()
         );
 
-        Collect collect = new Collect(collectPhase, TopN.NO_LIMIT, 0, 1, 1, null);
-        return Merge.ensureOnHandler(collect, context, Collections.singletonList(MergeCountProjection.INSTANCE));
+        Collect collect = new Collect(collectPhase, TopN.NO_LIMIT, 0, 1, -1, null);
+        // add the projection to the plan to ensure that the outputs are correctly set to the projection outputs
+        collect.addProjection(sourceIndexWriterProjection);
+
+        List<Projection> handlerProjections;
+        if (isReturnSummary) {
+            handlerProjections = Collections.emptyList();
+        } else {
+            handlerProjections = Collections.singletonList(MergeCountProjection.INSTANCE);
+        }
+        return Merge.ensureOnHandler(collect, context, handlerProjections);
     }
 
     private static void rewriteToCollectToUsePartitionValues(List<Reference> partitionedByColumns,
@@ -245,12 +286,12 @@ public final class CopyStatementPlanner {
 
     /**
      * To generate the upsert request the following is required:
-     *
-     *  - relationName + partitionIdent / partitionValues
-     *      -> to retrieve the indexName
-     *
-     *  - primaryKeys + clusteredBy  (+ indexName)
-     *      -> to calculate the shardId
+     * <p>
+     * - relationName + partitionIdent / partitionValues
+     * -> to retrieve the indexName
+     * <p>
+     * - primaryKeys + clusteredBy  (+ indexName)
+     * -> to calculate the shardId
      */
     private static List<Symbol> getSymbolsRequiredForShardIdCalc(List<Reference> primaryKeyRefs,
                                                                  List<Reference> partitionedByRefs,
@@ -274,16 +315,16 @@ public final class CopyStatementPlanner {
 
     /**
      * Return RAW or DOC Reference:
-     *
+     * <p>
      * Copy from has two "modes" on how the json-object-lines are processed:
-     *
+     * <p>
      * 1: non-partitioned tables or partitioned tables with partition ident --> import into single es index
-     *    -> collect raw source and import as is
-     *
+     * -> collect raw source and import as is
+     * <p>
      * 2: partitioned table without partition ident
-     *    -> collect document and partition by values
-     *    -> exclude partitioned by columns from document
-     *    -> insert into es index (partition determined by partition by value)
+     * -> collect document and partition by values
+     * -> exclude partitioned by columns from document
+     * -> insert into es index (partition determined by partition by value)
      */
     private static Reference rawOrDoc(DocTableInfo table, String selectedPartitionIdent) {
         if (table.isPartitioned() && selectedPartitionIdent == null) {

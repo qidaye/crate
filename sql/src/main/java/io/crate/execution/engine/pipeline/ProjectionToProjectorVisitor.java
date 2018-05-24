@@ -61,7 +61,10 @@ import io.crate.execution.engine.indexing.DMLProjector;
 import io.crate.execution.engine.indexing.IndexNameResolver;
 import io.crate.execution.engine.indexing.IndexWriterProjector;
 import io.crate.execution.engine.indexing.ShardDMLExecutor;
+import io.crate.execution.engine.indexing.ShardUpsertRequestAndResponse;
 import io.crate.execution.engine.indexing.ShardingUpsertExecutor;
+import io.crate.execution.engine.indexing.UpsertResultCollectors;
+import io.crate.execution.engine.indexing.UpsertResults;
 import io.crate.execution.engine.sort.OrderingByPosition;
 import io.crate.execution.engine.sort.SortingProjector;
 import io.crate.execution.engine.sort.SortingTopNProjector;
@@ -71,6 +74,7 @@ import io.crate.expression.RowFilter;
 import io.crate.expression.eval.EvaluatingNormalizer;
 import io.crate.expression.reference.StaticTableDefinition;
 import io.crate.expression.reference.sys.SysRowUpdater;
+import io.crate.expression.symbol.InputColumn;
 import io.crate.expression.symbol.Literal;
 import io.crate.expression.symbol.Symbol;
 import io.crate.expression.symbol.Symbols;
@@ -82,6 +86,7 @@ import io.crate.metadata.RelationName;
 import io.crate.metadata.RowCollectExpression;
 import io.crate.metadata.TransactionContext;
 import io.crate.types.StringType;
+import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.Version;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.settings.Settings;
@@ -100,6 +105,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.stream.Collector;
 
 public class ProjectionToProjectorVisitor
     extends ProjectionVisitor<ProjectionToProjectorVisitor.Context, Projector> implements ProjectorFactory {
@@ -336,6 +342,27 @@ public class ProjectionToProjectorVisitor
             IndexNameResolver.create(projection.tableIdent(), projection.partitionIdent(), partitionedByInputs);
         Settings tableSettings = TableSettingsResolver.get(clusterService.state().getMetaData(),
             projection.tableIdent(), !projection.partitionedBySymbols().isEmpty());
+
+
+        InputFactory.Context<CollectExpression<Row, ?>> ctxSourceInfo = inputFactory.ctxForInputColumns();
+        Input<BytesRef> sourceUriInput;
+        Input<String> sourceUriFailureInput;
+        Collector<ShardUpsertRequestAndResponse, UpsertResults, Iterable<Row>> resultCollector;
+        InputColumn sourceUriSymbol = projection.sourceUriSymbol();
+        InputColumn sourceUriFailureSymbol = projection.sourceUriFailureSymbol();
+        // only take into account if both symbols are set
+        if (sourceUriSymbol != null && sourceUriFailureSymbol != null) {
+            resultCollector = UpsertResultCollectors.newSummaryCollector(clusterService.localNode());
+            //noinspection unchecked
+            sourceUriInput = (Input<BytesRef>) ctxSourceInfo.add(sourceUriSymbol);
+            //noinspection unchecked
+            sourceUriFailureInput = (Input<String>) ctxSourceInfo.add(sourceUriFailureSymbol);
+        } else {
+            resultCollector = UpsertResultCollectors.newRowCountCollector();
+            sourceUriInput = () -> null;
+            sourceUriFailureInput = () -> null;
+        }
+
         return new IndexWriterProjector(
             clusterService,
             nodeJobsCounter,
@@ -353,13 +380,17 @@ public class ProjectionToProjectorVisitor
             projection.clusteredBy(),
             projection.clusteredByIdent(),
             sourceInput,
+            sourceUriInput,
+            sourceUriFailureInput,
             ctx.expressions(),
+            ctxSourceInfo.expressions(),
             projection.bulkActions(),
             projection.includes(),
             projection.excludes(),
             projection.autoCreateIndices(),
             projection.overwriteDuplicates(),
-            context.jobId
+            context.jobId,
+            resultCollector
         );
     }
 

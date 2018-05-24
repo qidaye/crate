@@ -20,23 +20,26 @@
  * agreement.
  */
 
-package io.crate.execution.engine.collect.files
+package io.crate.expression.reference.file;
 
-import io.crate.test.integration.CrateUnitTest
-import org.junit.Test
+import io.crate.execution.engine.collect.files.LineCollectorExpression;
 
-import java.nio.file.Path
+import javax.annotation.Nullable;
 
-class URLFileInputTest extends CrateUnitTest {
+public class UriFailureExpression extends LineCollectorExpression<String> {
 
-    @Test
-    void testGetStream() {
-        Path tempDir = createTempDir();
-        File file = new File(tempDir.toFile(), "dont_exists")
-        URLFileInput input = new URLFileInput(file.toURI());
+    public static final String COLUMN_NAME = "_uri_failure";
 
-        expectedException.expect(FileNotFoundException.class);
-        expectedException.expectMessage("/dont_exists (No such file or directory)");
-        input.getStream(file.toURI());
+    private LineContext lineContext;
+
+    @Override
+    public void startCollect(LineContext context) {
+        this.lineContext = context;
+    }
+
+    @Nullable
+    @Override
+    public String value() {
+        return lineContext.getCurrentUriFailure();
     }
 }

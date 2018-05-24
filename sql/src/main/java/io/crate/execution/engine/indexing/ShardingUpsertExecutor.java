@@ -26,8 +26,8 @@ import io.crate.action.FutureActionListener;
 import io.crate.action.LimitedExponentialBackoff;
 import io.crate.data.BatchIterator;
 import io.crate.data.BatchIterators;
+import io.crate.data.Input;
 import io.crate.data.Row;
-import io.crate.data.Row1;
 import io.crate.execution.dml.ShardResponse;
 import io.crate.execution.dml.upsert.ShardUpsertRequest;
 import io.crate.execution.engine.collect.CollectExpression;
@@ -51,7 +51,6 @@ import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.index.shard.ShardId;
 
 import javax.annotation.Nullable;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -61,10 +60,11 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collector;
 
 import static io.crate.execution.jobs.NodeJobsCounter.MAX_NODE_CONCURRENT_OPERATIONS;
 
@@ -88,6 +88,7 @@ public class ShardingUpsertExecutor
     private final BulkRequestExecutor<ShardUpsertRequest> requestExecutor;
     private final TransportCreatePartitionsAction createPartitionsAction;
     private final BulkShardCreationLimiter<ShardUpsertRequest, ShardUpsertRequest.Item> bulkShardCreationLimiter;
+    private final Collector<ShardUpsertRequestAndResponse, UpsertResults, Iterable<Row>> resultCollector;
     private volatile boolean createPartitionsRequestOngoing = false;
 
     ShardingUpsertExecutor(ClusterService clusterService,
@@ -98,13 +99,18 @@ public class ShardingUpsertExecutor
                            UUID jobId,
                            RowShardResolver rowShardResolver,
                            Function<String, ShardUpsertRequest.Item> itemFactory,
+                           Function<String, ShardUpsertRequest.Item> itemFailureFactory,
+                           Function<String, ShardUpsertRequest.Item> sourceUriFailureFactory,
                            Function<ShardId, ShardUpsertRequest> requestFactory,
                            List<? extends CollectExpression<Row, ?>> expressions,
+                           List<? extends CollectExpression<Row, ?>> metaExpressions,
+                           Input<String> sourceUriFailureInput,
                            Supplier<String> indexNameResolver,
                            boolean autoCreateIndices,
                            BulkRequestExecutor<ShardUpsertRequest> requestExecutor,
                            TransportCreatePartitionsAction createPartitionsAction,
-                           Settings tableSettings) {
+                           Settings tableSettings,
+                           Collector<ShardUpsertRequestAndResponse, UpsertResults, Iterable<Row>> resultCollector) {
         this.nodeJobsCounter = nodeJobsCounter;
         this.scheduler = scheduler;
         this.executor = executor;
@@ -118,31 +124,54 @@ public class ShardingUpsertExecutor
             rowShardResolver,
             indexNameResolver,
             expressions,
+            metaExpressions,
             itemFactory,
+            itemFailureFactory,
+            sourceUriFailureFactory,
+            sourceUriFailureInput,
             autoCreateIndices
         );
         bulkShardCreationLimiter = new BulkShardCreationLimiter<>(tableSettings,
             clusterService.state().nodes().getDataNodes().size());
+        this.resultCollector = resultCollector;
     }
 
-    public CompletableFuture<Long> execute(ShardedRequests<ShardUpsertRequest, ShardUpsertRequest.Item> requests) {
+    public CompletableFuture<UpsertResults> execute(ShardedRequests<ShardUpsertRequest, ShardUpsertRequest.Item> requests) {
+        final UpsertResults upsertResults = resultCollector.supplier().get();
+        collectFailingItems(requests, upsertResults);
         if (requests.itemsByMissingIndex.isEmpty()) {
-            return execRequests(requests.itemsByShard);
+            return execRequests(requests.itemsByShard, upsertResults);
         }
         createPartitionsRequestOngoing = true;
         return createPartitions(requests.itemsByMissingIndex)
             .thenCompose(resp -> {
                 grouper.reResolveShardLocations(requests);
                 createPartitionsRequestOngoing = false;
-                return execRequests(requests.itemsByShard);
+                return execRequests(requests.itemsByShard, upsertResults);
             });
     }
 
-    private CompletableFuture<Long> execRequests(Map<ShardLocation, ShardUpsertRequest> itemsByShard) {
+    private void collectFailingItems(ShardedRequests<ShardUpsertRequest, ShardUpsertRequest.Item> requests,
+                                     final UpsertResults upsertResults) {
+        for (ShardUpsertRequest.Item item : requests.itemsWithFailure) {
+            String sourceUriFailure = item.sourceUriFailure();
+            if (sourceUriFailure == null) {
+                upsertResults.addResult(item.sourceUri(), item.readFailure());
+            } else {
+                upsertResults.addUriFailure(item.sourceUri(), sourceUriFailure);
+            }
+        }
+    }
+
+    private CompletableFuture<UpsertResults> execRequests(Map<ShardLocation, ShardUpsertRequest> itemsByShard,
+                                                          final UpsertResults upsertResults) {
+        if (itemsByShard.isEmpty()) {
+            // could be that processing the source uri only results in errors, so no items per shard exists
+            return CompletableFuture.completedFuture(upsertResults);
+        }
         final AtomicInteger numRequests = new AtomicInteger(itemsByShard.size());
-        final AtomicLong rowCount = new AtomicLong(0L);
         final AtomicReference<Exception> interrupt = new AtomicReference<>(null);
-        final CompletableFuture<Long> rowCountFuture = new CompletableFuture<>();
+        final CompletableFuture<UpsertResults> resultFuture = new CompletableFuture<>();
         Iterator<Map.Entry<ShardLocation, ShardUpsertRequest>> it = itemsByShard.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<ShardLocation, ShardUpsertRequest> entry = it.next();
@@ -152,7 +181,7 @@ public class ShardingUpsertExecutor
             String nodeId = entry.getKey().nodeId;
             nodeJobsCounter.increment(nodeId);
             ActionListener<ShardResponse> listener =
-                new ShardResponseActionListener(nodeId, rowCount, numRequests, interrupt, rowCountFuture);
+                new ShardResponseActionListener(nodeId, request, numRequests, interrupt, upsertResults, resultCollector.accumulator(), resultFuture);
 
             listener = new RetryListener<>(
                 scheduler,
@@ -165,7 +194,7 @@ public class ShardingUpsertExecutor
             );
             requestExecutor.execute(request, listener);
         }
-        return rowCountFuture;
+        return resultFuture;
     }
 
 
@@ -199,44 +228,51 @@ public class ShardingUpsertExecutor
             BatchIterators.partition(batchIterator, bulkSize, () -> new ShardedRequests<>(requestFactory), grouper,
                 bulkShardCreationLimiter);
 
-        BatchIteratorBackpressureExecutor<ShardedRequests<ShardUpsertRequest, ShardUpsertRequest.Item>, Long> executor =
+        BatchIteratorBackpressureExecutor<ShardedRequests<ShardUpsertRequest, ShardUpsertRequest.Item>, UpsertResults> executor =
             new BatchIteratorBackpressureExecutor<>(
                 scheduler,
                 this.executor,
                 reqBatchIterator,
                 this::execute,
-                (a, b) -> a + b,
-                0L,
+                (a, b) -> resultCollector.combiner().apply(a, b),
+                resultCollector.supplier().get(),
                 this::shouldPause,
                 BACKOFF_POLICY
             );
         return executor.consumeIteratorAndExecute()
-            .thenApply(rowCount -> Collections.singletonList(new Row1(rowCount)));
+            .thenApply(upsertResults -> resultCollector.finisher().apply(upsertResults));
     }
 
     private class ShardResponseActionListener implements ActionListener<ShardResponse> {
         private final String operationNodeId;
-        private final AtomicLong rowCount;
+        private final ShardUpsertRequestAndResponse shardRequestAndResponse;
+        private final BiConsumer<UpsertResults, ShardUpsertRequestAndResponse> consumer;
+        private final UpsertResults upsertResults;
         private final AtomicInteger numRequests;
         private final AtomicReference<Exception> interrupt;
-        private final CompletableFuture<Long> rowCountFuture;
+        private final CompletableFuture<UpsertResults> upsertResultFuture;
 
         ShardResponseActionListener(String operationNodeId,
-                                    AtomicLong rowCount,
+                                    ShardUpsertRequest shardRequest,
                                     AtomicInteger numRequests,
                                     AtomicReference<Exception> interrupt,
-                                    CompletableFuture<Long> rowCountFuture) {
+                                    UpsertResults upsertResults,
+                                    BiConsumer<UpsertResults, ShardUpsertRequestAndResponse> consumer,
+                                    CompletableFuture<UpsertResults> upsertResultFuture) {
             this.operationNodeId = operationNodeId;
-            this.rowCount = rowCount;
+            this.shardRequestAndResponse = new ShardUpsertRequestAndResponse(shardRequest);
             this.numRequests = numRequests;
             this.interrupt = interrupt;
-            this.rowCountFuture = rowCountFuture;
+            this.upsertResults = upsertResults;
+            this.consumer = consumer;
+            this.upsertResultFuture = upsertResultFuture;
         }
 
         @Override
         public void onResponse(ShardResponse shardResponse) {
             nodeJobsCounter.decrement(operationNodeId);
-            rowCount.addAndGet(shardResponse.successRowCount());
+            shardRequestAndResponse.shardResponse = shardResponse;
+            consumer.accept(upsertResults, shardRequestAndResponse);
             maybeSetInterrupt(shardResponse.failure());
             countdown();
         }
@@ -251,9 +287,9 @@ public class ShardingUpsertExecutor
             if (numRequests.decrementAndGet() == 0) {
                 Exception interruptedException = interrupt.get();
                 if (interruptedException == null) {
-                    rowCountFuture.complete(rowCount.get());
+                    upsertResultFuture.complete(upsertResults);
                 } else {
-                    rowCountFuture.completeExceptionally(interruptedException);
+                    upsertResultFuture.completeExceptionally(interruptedException);
                 }
             }
         }
@@ -264,4 +300,5 @@ public class ShardingUpsertExecutor
             }
         }
     }
+
 }

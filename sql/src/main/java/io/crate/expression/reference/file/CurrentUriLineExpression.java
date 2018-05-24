@@ -20,23 +20,24 @@
  * agreement.
  */
 
-package io.crate.execution.engine.collect.files
+package io.crate.expression.reference.file;
 
-import io.crate.test.integration.CrateUnitTest
-import org.junit.Test
+import io.crate.execution.engine.collect.files.LineCollectorExpression;
+import org.apache.lucene.util.BytesRef;
 
-import java.nio.file.Path
+public class CurrentUriLineExpression extends LineCollectorExpression<BytesRef> {
 
-class URLFileInputTest extends CrateUnitTest {
+    public static final String COLUMN_NAME = "_uri";
 
-    @Test
-    void testGetStream() {
-        Path tempDir = createTempDir();
-        File file = new File(tempDir.toFile(), "dont_exists")
-        URLFileInput input = new URLFileInput(file.toURI());
+    private LineContext context;
 
-        expectedException.expect(FileNotFoundException.class);
-        expectedException.expectMessage("/dont_exists (No such file or directory)");
-        input.getStream(file.toURI());
+    @Override
+    public void startCollect(LineContext context) {
+        this.context = context;
+    }
+
+    @Override
+    public BytesRef value() {
+        return context.currentUri();
     }
 }
