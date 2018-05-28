@@ -34,6 +34,18 @@ import java.util.concurrent.CompletableFuture;
  */
 public interface Plan {
 
+    enum StatementType {
+        INSERT,
+        SELECT,
+        UPDATE,
+        DELETE,
+        COPY,
+        DDL,
+        MANAGEMENT
+    }
+
+    StatementType type();
+
     void execute(DependencyCarrier executor,
                  PlannerContext plannerContext,
                  RowConsumer consumer,
