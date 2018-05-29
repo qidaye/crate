@@ -43,7 +43,7 @@ import io.crate.planner.DependencyCarrier;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
 import io.crate.planner.PlannerContext;
-import io.crate.planner.operators.QueryClassifier;
+import io.crate.planner.operators.StatementClassifier;
 import io.crate.planner.operators.SubQueryResults;
 import io.crate.sql.tree.Statement;
 import io.crate.types.DataType;
@@ -55,7 +55,6 @@ import org.elasticsearch.common.logging.Loggers;
 import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -214,7 +213,7 @@ public class SimplePortal extends AbstractPortal {
         }
 
         // TODO: pass classifcation to logExecutionStart()
-        QueryClassifier.Classification classification = QueryClassifier.classify(plan);
+        StatementClassifier.Classification classification = StatementClassifier.classify(plan);
         LOGGER.info("jobId={} {}", jobId, classification.toString());
 
         jobsLogs.logExecutionStart(jobId, query, sessionContext.user());

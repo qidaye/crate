@@ -33,7 +33,7 @@ import io.crate.metadata.RowGranularity;
 import io.crate.metadata.expressions.RowCollectExpressionFactory;
 import io.crate.metadata.table.ColumnRegistrar;
 import io.crate.metadata.table.StaticTableInfo;
-import io.crate.planner.operators.QueryClassifier;
+import io.crate.planner.operators.StatementClassifier;
 import io.crate.types.DataTypes;
 import org.HdrHistogram.Histogram;
 import org.apache.lucene.util.BytesRef;
@@ -74,9 +74,9 @@ public class SysMetricsTableInfo extends StaticTableInfo {
     public static class ClassifiedHist {
 
         private Histogram histogram;
-        private QueryClassifier.Classification classification;
+        private StatementClassifier.Classification classification;
 
-        public ClassifiedHist(Histogram histogram, QueryClassifier.Classification classification) {
+        public ClassifiedHist(Histogram histogram, StatementClassifier.Classification classification) {
             this.histogram = histogram;
             this.classification = classification;
         }

@@ -26,9 +26,10 @@ import io.crate.planner.Plan;
 
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 
-public class QueryClassifier {
+public class StatementClassifier {
 
     private static final Visitor CLASS_EXTRACTOR = new Visitor();
 
@@ -68,6 +69,20 @@ public class QueryClassifier {
         @Override
         public String toString() {
             return "Classification{type=" + type + ", labels=" + labels + "}";
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Classification that = (Classification) o;
+            return Objects.equals(labels, that.labels) &&
+                   type == that.type;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(labels, type);
         }
     }
 

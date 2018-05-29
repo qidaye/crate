@@ -29,7 +29,7 @@ import io.crate.expression.reference.sys.operation.OperationContext;
 import io.crate.expression.reference.sys.operation.OperationContextLog;
 import io.crate.metadata.sys.SysMetricsTableInfo;
 import io.crate.planner.Plan;
-import io.crate.planner.operators.QueryClassifier;
+import io.crate.planner.operators.StatementClassifier;
 import org.HdrHistogram.ConcurrentHistogram;
 import org.elasticsearch.common.collect.Tuple;
 
@@ -73,7 +73,7 @@ public class JobsLogs {
 
     private final LongAdder activeRequests = new LongAdder();
     private final BooleanSupplier enabled;
-    private final ConcurrentHashMap<QueryClassifier.Classification, ConcurrentHistogram> histograms = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<StatementClassifier.Classification, ConcurrentHistogram> histograms = new ConcurrentHashMap<>();
     private final ConcurrentHistogram histogram = new ConcurrentHistogram(TimeUnit.MINUTES.toMillis(10), 3);
 
     public JobsLogs(BooleanSupplier enabled) {
@@ -149,7 +149,7 @@ public class JobsLogs {
 
     public Iterable<SysMetricsTableInfo.ClassifiedHist> metrics() {
         return singletonList(new SysMetricsTableInfo.ClassifiedHist(histogram.copy(),
-            new QueryClassifier.Classification(Plan.StatementType.ALL)));
+            new StatementClassifier.Classification(Plan.StatementType.ALL)));
     }
 
     public void operationFinished(int operationId, UUID jobId, @Nullable String errorMessage, long usedBytes) {
