@@ -41,7 +41,8 @@ public interface Plan {
         DELETE,
         COPY,
         DDL,
-        MANAGEMENT
+        MANAGEMENT,
+        ALL
     }
 
     StatementType type();

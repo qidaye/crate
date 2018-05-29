@@ -213,6 +213,7 @@ public class SimplePortal extends AbstractPortal {
             );
         }
 
+        // TODO: pass classifcation to logExecutionStart()
         QueryClassifier.Classification classification = QueryClassifier.classify(plan);
         LOGGER.info("jobId={} {}", jobId, classification.toString());
 

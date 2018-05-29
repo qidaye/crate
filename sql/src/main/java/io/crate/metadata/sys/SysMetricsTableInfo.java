@@ -33,6 +33,7 @@ import io.crate.metadata.RowGranularity;
 import io.crate.metadata.expressions.RowCollectExpressionFactory;
 import io.crate.metadata.table.ColumnRegistrar;
 import io.crate.metadata.table.StaticTableInfo;
+import io.crate.planner.operators.QueryClassifier;
 import io.crate.types.DataTypes;
 import org.HdrHistogram.Histogram;
 import org.apache.lucene.util.BytesRef;
@@ -65,23 +66,19 @@ public class SysMetricsTableInfo extends StaticTableInfo {
         static final ColumnIdent NODE = new ColumnIdent("node");
         static final ColumnIdent NODE_ID = new ColumnIdent("node", "id");
         static final ColumnIdent NODE_NAME = new ColumnIdent("node", "name");
+        static final ColumnIdent CLASS = new ColumnIdent("classification");
+        static final ColumnIdent CLASS_TYPE = new ColumnIdent("classification", "type");
+        static final ColumnIdent CLASS_LABELS = new ColumnIdent("classification", "labels");
     }
 
     public static class ClassifiedHist {
-        Histogram histogram;
-        String type;
 
-        public ClassifiedHist(Histogram histogram, String type) {
+        private Histogram histogram;
+        private QueryClassifier.Classification classification;
+
+        public ClassifiedHist(Histogram histogram, QueryClassifier.Classification classification) {
             this.histogram = histogram;
-            this.type = type;
-        }
-
-        public Histogram histogram() {
-            return histogram;
-        }
-
-        public String type() {
-            return type;
+            this.classification = classification;
         }
     }
 
@@ -102,7 +99,10 @@ public class SysMetricsTableInfo extends StaticTableInfo {
                 .register(Columns.P99, DataTypes.LONG)
                 .register(Columns.NODE, DataTypes.OBJECT)
                 .register(Columns.NODE_ID, DataTypes.STRING)
-                .register(Columns.NODE_NAME, DataTypes.STRING),
+                .register(Columns.NODE_NAME, DataTypes.STRING)
+                .register(Columns.CLASS, DataTypes.OBJECT)
+                .register(Columns.CLASS_TYPE, DataTypes.STRING)
+                .register(Columns.CLASS_LABELS, DataTypes.STRING_ARRAY),
             Collections.emptyList()
         );
     }
@@ -136,6 +136,13 @@ public class SysMetricsTableInfo extends StaticTableInfo {
             ))
             .put(Columns.NODE_ID, () -> forFunction(ignored -> new BytesRef(localNode.get().getId())))
             .put(Columns.NODE_NAME, () -> forFunction(ignored -> new BytesRef(localNode.get().getName())))
+            .put(Columns.CLASS, () -> forFunction(h -> ImmutableMap.builder()
+                .put("type", new BytesRef(h.classification.type().name()))
+                .put("labels", h.classification.labels())
+                .build()
+            ))
+            .put(Columns.CLASS_TYPE, () -> forFunction(h -> new BytesRef(h.classification.type().name())))
+            .put(Columns.CLASS_LABELS, () -> forFunction(h -> h.classification.labels()))
             .build();
     }
 

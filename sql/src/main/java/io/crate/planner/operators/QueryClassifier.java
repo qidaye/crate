@@ -52,7 +52,7 @@ public class QueryClassifier {
             this.labels = labels;
         }
 
-        Classification(Plan.StatementType type) {
+        public Classification(Plan.StatementType type) {
             this.type = type;
             this.labels = Collections.emptySet();
         }
