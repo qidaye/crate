@@ -23,6 +23,8 @@ import io.crate.auth.user.User;
 import io.crate.execution.engine.collect.stats.JobsLogs;
 import io.crate.expression.reference.sys.job.JobContext;
 import io.crate.expression.reference.sys.job.JobContextLog;
+import io.crate.planner.Plan;
+import io.crate.planner.operators.StatementClassifier;
 import org.junit.Test;
 
 import java.util.List;
@@ -34,14 +36,25 @@ import static org.junit.Assert.assertThat;
 
 public class QueryStatsTest {
 
+    private static final StatementClassifier.Classification SELECT_CLASSIFICATION =
+        new StatementClassifier.Classification(Plan.StatementType.SELECT);
+    private static final StatementClassifier.Classification UPDATE_CLASSIFICATION =
+        new StatementClassifier.Classification(Plan.StatementType.UPDATE);
+    private static final StatementClassifier.Classification DELETE_CLASSIFICATION =
+        new StatementClassifier.Classification(Plan.StatementType.DELETE);
+    private static final StatementClassifier.Classification INSERT_CLASSIFICATION =
+        new StatementClassifier.Classification(Plan.StatementType.INSERT);
+    private static final StatementClassifier.Classification DDL_CLASSIFICATION =
+        new StatementClassifier.Classification(Plan.StatementType.DDL);
+
     private final List<JobContextLog> log = ImmutableList.of(
-        new JobContextLog(new JobContext(UUID.randomUUID(), "select name", 100L, User.CRATE_USER), null, 150L),
-        new JobContextLog(new JobContext(UUID.randomUUID(), "select name", 300L, User.CRATE_USER), null, 320L),
-        new JobContextLog(new JobContext(UUID.randomUUID(), "update t1 set x = 10", 400L, User.CRATE_USER), null, 420L),
-        new JobContextLog(new JobContext(UUID.randomUUID(), "insert into t1 (x) values (20)", 111L, User.CRATE_USER), null, 130L),
-        new JobContextLog(new JobContext(UUID.randomUUID(), "delete from t1", 410L, User.CRATE_USER), null, 415L),
-        new JobContextLog(new JobContext(UUID.randomUUID(), "delete from t1", 110L, User.CRATE_USER), null, 120L),
-        new JobContextLog(new JobContext(UUID.randomUUID(), "create table t1 (x int)", 105L, User.CRATE_USER), null, 106L)
+        new JobContextLog(new JobContext(UUID.randomUUID(), "select name", 100L, User.CRATE_USER, SELECT_CLASSIFICATION), null, 150L),
+        new JobContextLog(new JobContext(UUID.randomUUID(), "select name", 300L, User.CRATE_USER, SELECT_CLASSIFICATION), null, 320L),
+        new JobContextLog(new JobContext(UUID.randomUUID(), "update t1 set x = 10", 400L, User.CRATE_USER, UPDATE_CLASSIFICATION), null, 420L),
+        new JobContextLog(new JobContext(UUID.randomUUID(), "insert into t1 (x) values (20)", 111L, User.CRATE_USER, INSERT_CLASSIFICATION), null, 130L),
+        new JobContextLog(new JobContext(UUID.randomUUID(), "delete from t1", 410L, User.CRATE_USER, DELETE_CLASSIFICATION), null, 415L),
+        new JobContextLog(new JobContext(UUID.randomUUID(), "delete from t1", 110L, User.CRATE_USER, DELETE_CLASSIFICATION), null, 120L),
+        new JobContextLog(new JobContext(UUID.randomUUID(), "create table t1 (x int)", 105L, User.CRATE_USER, DDL_CLASSIFICATION), null, 106L)
     );
 
     @Test

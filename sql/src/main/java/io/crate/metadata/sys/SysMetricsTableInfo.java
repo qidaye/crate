@@ -39,6 +39,7 @@ import org.HdrHistogram.Histogram;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.node.DiscoveryNode;
+import org.elasticsearch.common.lucene.BytesRefs;
 
 import java.util.Collections;
 import java.util.Map;
@@ -142,7 +143,11 @@ public class SysMetricsTableInfo extends StaticTableInfo {
                 .build()
             ))
             .put(Columns.CLASS_TYPE, () -> forFunction(h -> new BytesRef(h.classification.type().name())))
-            .put(Columns.CLASS_LABELS, () -> forFunction(h -> h.classification.labels()))
+            .put(Columns.CLASS_LABELS, () -> forFunction(h -> h.classification.labels()
+                .stream()
+                .map(BytesRefs::toBytesRef)
+                .toArray(BytesRef[]::new)
+            ))
             .build();
     }
 

@@ -28,7 +28,6 @@ import io.crate.expression.reference.sys.job.JobContextLog;
 import io.crate.expression.reference.sys.operation.OperationContext;
 import io.crate.expression.reference.sys.operation.OperationContextLog;
 import io.crate.metadata.sys.SysMetricsTableInfo;
-import io.crate.planner.Plan;
 import io.crate.planner.operators.StatementClassifier;
 import org.HdrHistogram.ConcurrentHistogram;
 import org.elasticsearch.common.collect.Tuple;
@@ -42,8 +41,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Collectors;
 
-import static java.util.Collections.singletonList;
 
 /**
  * JobsLogs is responsible for adding jobs and operations of that node.
@@ -74,7 +73,6 @@ public class JobsLogs {
     private final LongAdder activeRequests = new LongAdder();
     private final BooleanSupplier enabled;
     private final ConcurrentHashMap<StatementClassifier.Classification, ConcurrentHistogram> histograms = new ConcurrentHashMap<>();
-    private final ConcurrentHistogram histogram = new ConcurrentHistogram(TimeUnit.MINUTES.toMillis(10), 3);
 
     public JobsLogs(BooleanSupplier enabled) {
         this.enabled = enabled;
@@ -101,12 +99,12 @@ public class JobsLogs {
      * <p>
      * If {@link #isEnabled()} is false this method won't do anything.
      */
-    public void logExecutionStart(UUID jobId, String statement, User user) {
+    public void logExecutionStart(UUID jobId, String statement, User user, StatementClassifier.Classification classification) {
         activeRequests.increment();
         if (!isEnabled()) {
             return;
         }
-        jobsTable.put(jobId, new JobContext(jobId, statement, System.currentTimeMillis(), user));
+        jobsTable.put(jobId, new JobContext(jobId, statement, System.currentTimeMillis(), user, classification));
     }
 
     /**
@@ -122,20 +120,31 @@ public class JobsLogs {
         }
         LogSink<JobContextLog> jobContextLogs = jobsLog.get();
         JobContextLog contextLog = new JobContextLog(jobContext, errorMessage);
-        histogram.recordValue(contextLog.ended() - contextLog.started());
+        addToHistogram(contextLog);
         jobContextLogs.add(contextLog);
+    }
+
+    private void addToHistogram(JobContextLog log) {
+        StatementClassifier.Classification classification = log.classification();
+        assert classification != null : "A job must have a classificiation";
+        ConcurrentHistogram histogram = histograms.get(classification);
+        if (histogram == null) {
+            histogram = new ConcurrentHistogram(TimeUnit.MINUTES.toMillis(10), 3);
+            histograms.put(classification, histogram);
+        }
+        histogram.recordValue(log.ended() - log.started());
     }
 
     /**
      * Create a entry into `sys.jobs_log`
-     * This method can be used instead of {@link #logExecutionEnd(UUID, String)} if there was no {@link #logExecutionStart(UUID, String, User)}
+     * This method can be used instead of {@link #logExecutionEnd(UUID, String)} if there was no {@link #logExecutionStart(UUID, String, User, StatementClassifier.Classification)}
      * Call because an error happened during parse, analysis or plan.
      * <p>
-     * {@link #logExecutionStart(UUID, String, User)} is only called after a Plan has been created and execution starts.
+     * {@link #logExecutionStart(UUID, String, User, StatementClassifier.Classification)} is only called after a Plan has been created and execution starts.
      */
-    public void logPreExecutionFailure(UUID jobId, String stmt, String errorMessage, @Nullable User user) {
+    public void logPreExecutionFailure(UUID jobId, String stmt, String errorMessage, User user) {
         LogSink<JobContextLog> jobContextLogs = jobsLog.get();
-        JobContext jobContext = new JobContext(jobId, stmt, System.currentTimeMillis(), user);
+        JobContext jobContext = new JobContext(jobId, stmt, System.currentTimeMillis(), user, null);
         jobContextLogs.add(new JobContextLog(jobContext, errorMessage));
     }
 
@@ -148,8 +157,10 @@ public class JobsLogs {
     }
 
     public Iterable<SysMetricsTableInfo.ClassifiedHist> metrics() {
-        return singletonList(new SysMetricsTableInfo.ClassifiedHist(histogram.copy(),
-            new StatementClassifier.Classification(Plan.StatementType.ALL)));
+        return histograms.entrySet()
+            .stream()
+            .map(e -> new SysMetricsTableInfo.ClassifiedHist(e.getValue().copy(), e.getKey()))
+            .collect(Collectors.toList());
     }
 
     public void operationFinished(int operationId, UUID jobId, @Nullable String errorMessage, long usedBytes) {
@@ -194,5 +205,4 @@ public class JobsLogs {
     void updateJobsLog(LogSink<JobContextLog> sink) {
         jobsLog.set(sink);
     }
-
 }

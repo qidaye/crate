@@ -48,7 +48,7 @@ public class StatementClassifier {
         private final Set<String> labels;
         private final Plan.StatementType type;
 
-        Classification(Plan.StatementType type, Set<String> labels) {
+        public Classification(Plan.StatementType type, Set<String> labels) {
             this.type = type;
             this.labels = labels;
         }

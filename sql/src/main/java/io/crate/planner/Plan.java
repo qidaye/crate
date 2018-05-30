@@ -42,7 +42,8 @@ public interface Plan {
         COPY,
         DDL,
         MANAGEMENT,
-        ALL
+        ALL,
+        UNDEFINED,
     }
 
     StatementType type();

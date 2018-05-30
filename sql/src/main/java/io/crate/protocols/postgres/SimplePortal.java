@@ -212,11 +212,7 @@ public class SimplePortal extends AbstractPortal {
             );
         }
 
-        // TODO: pass classifcation to logExecutionStart()
-        StatementClassifier.Classification classification = StatementClassifier.classify(plan);
-        LOGGER.info("jobId={} {}", jobId, classification.toString());
-
-        jobsLogs.logExecutionStart(jobId, query, sessionContext.user());
+        jobsLogs.logExecutionStart(jobId, query, sessionContext.user(), StatementClassifier.classify(plan));
         JobsLogsUpdateListener jobsLogsUpdateListener = new JobsLogsUpdateListener(jobId, jobsLogs);
         CompletableFuture<?> completableFuture = resultReceiver.completionFuture()
             .whenComplete(jobsLogsUpdateListener);
