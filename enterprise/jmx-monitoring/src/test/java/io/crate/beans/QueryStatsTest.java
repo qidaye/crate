@@ -23,8 +23,8 @@ import io.crate.auth.user.User;
 import io.crate.execution.engine.collect.stats.JobsLogs;
 import io.crate.expression.reference.sys.job.JobContext;
 import io.crate.expression.reference.sys.job.JobContextLog;
-import io.crate.planner.Plan;
-import io.crate.planner.operators.StatementClassifier;
+import io.crate.planner.Plan.StatementType;
+import io.crate.planner.operators.StatementClassifier.Classification;
 import org.junit.Test;
 
 import java.util.List;
@@ -36,16 +36,11 @@ import static org.junit.Assert.assertThat;
 
 public class QueryStatsTest {
 
-    private static final StatementClassifier.Classification SELECT_CLASSIFICATION =
-        new StatementClassifier.Classification(Plan.StatementType.SELECT);
-    private static final StatementClassifier.Classification UPDATE_CLASSIFICATION =
-        new StatementClassifier.Classification(Plan.StatementType.UPDATE);
-    private static final StatementClassifier.Classification DELETE_CLASSIFICATION =
-        new StatementClassifier.Classification(Plan.StatementType.DELETE);
-    private static final StatementClassifier.Classification INSERT_CLASSIFICATION =
-        new StatementClassifier.Classification(Plan.StatementType.INSERT);
-    private static final StatementClassifier.Classification DDL_CLASSIFICATION =
-        new StatementClassifier.Classification(Plan.StatementType.DDL);
+    private static final Classification SELECT_CLASSIFICATION = new Classification(StatementType.SELECT);
+    private static final Classification UPDATE_CLASSIFICATION = new Classification(StatementType.UPDATE);
+    private static final Classification DELETE_CLASSIFICATION = new Classification(StatementType.DELETE);
+    private static final Classification INSERT_CLASSIFICATION = new Classification(StatementType.INSERT);
+    private static final Classification DDL_CLASSIFICATION = new Classification(StatementType.DDL);
 
     private final List<JobContextLog> log = ImmutableList.of(
         new JobContextLog(new JobContext(UUID.randomUUID(), "select name", 100L, User.CRATE_USER, SELECT_CLASSIFICATION), null, 150L),
@@ -58,31 +53,31 @@ public class QueryStatsTest {
     );
 
     @Test
-    public void testCreateMetricsMap() throws Exception {
-        Map<String, QueryStats.Metric> metricsByCommand = QueryStats.createMetricsMap(log, 2000, 0L);
+    public void testCreateMetricsMap() {
+        Map<StatementType, QueryStats.Metric> metricsByCommand = QueryStats.createMetricsMap(log, 2000, 0L);
         assertThat(metricsByCommand.size(), is(6));
 
-        assertThat(metricsByCommand.get(QueryStats.Commands.SELECT).avgDurationInMs(), is(35.0));
-        assertThat(metricsByCommand.get(QueryStats.Commands.SELECT).statementsPerSec(), is(1.0));
+        assertThat(metricsByCommand.get(StatementType.SELECT).avgDurationInMs(), is(35.0));
+        assertThat(metricsByCommand.get(StatementType.SELECT).statementsPerSec(), is(1.0));
 
-        assertThat(metricsByCommand.get(QueryStats.Commands.INSERT).avgDurationInMs(), is(19.0));
-        assertThat(metricsByCommand.get(QueryStats.Commands.INSERT).statementsPerSec(), is(0.5));
+        assertThat(metricsByCommand.get(StatementType.INSERT).avgDurationInMs(), is(19.0));
+        assertThat(metricsByCommand.get(StatementType.INSERT).statementsPerSec(), is(0.5));
 
-        assertThat(metricsByCommand.get(QueryStats.Commands.UPDATE).avgDurationInMs(), is(20.0));
-        assertThat(metricsByCommand.get(QueryStats.Commands.UPDATE).statementsPerSec(), is(0.5));
+        assertThat(metricsByCommand.get(StatementType.UPDATE).avgDurationInMs(), is(20.0));
+        assertThat(metricsByCommand.get(StatementType.UPDATE).statementsPerSec(), is(0.5));
 
-        assertThat(metricsByCommand.get(QueryStats.Commands.DELETE).avgDurationInMs(), is(7.0));
-        assertThat(metricsByCommand.get(QueryStats.Commands.DELETE).statementsPerSec(), is(1.0));
+        assertThat(metricsByCommand.get(StatementType.DELETE).avgDurationInMs(), is(7.0));
+        assertThat(metricsByCommand.get(StatementType.DELETE).statementsPerSec(), is(1.0));
 
-        assertThat(metricsByCommand.get(QueryStats.Commands.UNCLASSIFIED).avgDurationInMs(), is(1.0));
-        assertThat(metricsByCommand.get(QueryStats.Commands.UNCLASSIFIED).statementsPerSec(), is(0.5));
+        assertThat(metricsByCommand.get(StatementType.UNDEFINED).avgDurationInMs(), is(1.0));
+        assertThat(metricsByCommand.get(StatementType.UNDEFINED).statementsPerSec(), is(0.5));
 
-        assertThat(metricsByCommand.get(QueryStats.Commands.TOTAL).avgDurationInMs(), is(15.0));
-        assertThat(metricsByCommand.get(QueryStats.Commands.TOTAL).statementsPerSec(), is(4.0));
+        assertThat(metricsByCommand.get(StatementType.ALL).avgDurationInMs(), is(15.0));
+        assertThat(metricsByCommand.get(StatementType.ALL).statementsPerSec(), is(4.0));
     }
 
     @Test
-    public void testDefaultValue() throws Exception {
+    public void testDefaultValue() {
         QueryStats queryStats = new QueryStats(new JobsLogs(() -> true));
         assertThat(queryStats.getSelectQueryFrequency(), is(0.0));
         assertThat(queryStats.getSelectQueryAverageDuration(), is(0.0));
