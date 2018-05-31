@@ -62,7 +62,7 @@ import static io.crate.exceptions.Exceptions.rethrowUnchecked;
 public class FileReadingIterator implements BatchIterator<Row> {
 
     private static final Logger LOGGER = Loggers.getLogger(FileReadingIterator.class);
-    public static final int MAX_SOCKET_TIMEOUT_RETRIES = 5;
+    private static final int MAX_SOCKET_TIMEOUT_RETRIES = 5;
     private final Map<String, FileInputFactory> fileInputFactories;
     private final Boolean shared;
     private final int numReaders;
@@ -94,12 +94,7 @@ public class FileReadingIterator implements BatchIterator<Row> {
                                 int readerNumber,
                                 FileUriCollectPhase.InputFormat inputFormat) {
         this.compressed = compression != null && compression.equalsIgnoreCase("gzip");
-        this.row = new InputRow(inputs) {
-            @Override
-            public Object get(int index) {
-                return inputs.get(index).value();
-            }
-        };
+        this.row = new InputRow(inputs);
         this.fileInputFactories = fileInputFactories;
         this.shared = shared;
         this.numReaders = numReaders;
@@ -139,13 +134,8 @@ public class FileReadingIterator implements BatchIterator<Row> {
 
         List<Tuple<FileInput, UriWithGlob>> fileInputs = new ArrayList<>(urisWithGlob.size());
         for (UriWithGlob fileUri : urisWithGlob) {
-            try {
-                FileInput fileInput = getFileInput(fileUri.uri);
-                fileInputs.add(new Tuple<>(fileInput, fileUri));
-            } catch (IOException e) {
-                lineProcessor.startWithUri(fileUri.uri);
-                lineProcessor.setFailure(e.getMessage());
-            }
+            FileInput fileInput = getFileInput(fileUri.uri);
+            fileInputs.add(new Tuple<>(fileInput, fileUri));
         }
         fileInputsIterator = fileInputs.iterator();
     }
@@ -285,7 +275,7 @@ public class FileReadingIterator implements BatchIterator<Row> {
         @Nullable
         final Predicate<URI> globPredicate;
 
-        public UriWithGlob(URI uri, URI preGlobUri, Predicate<URI> globPredicate) {
+        UriWithGlob(URI uri, URI preGlobUri, Predicate<URI> globPredicate) {
             this.uri = uri;
             this.preGlobUri = preGlobUri;
             this.globPredicate = globPredicate;
@@ -353,7 +343,7 @@ public class FileReadingIterator implements BatchIterator<Row> {
     }
 
     @Nullable
-    private FileInput getFileInput(URI fileUri) throws IOException {
+    private FileInput getFileInput(URI fileUri) {
         FileInputFactory fileInputFactory = fileInputFactories.get(fileUri.getScheme());
         if (fileInputFactory != null) {
             return fileInputFactory.create();

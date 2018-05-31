@@ -257,7 +257,7 @@ public class ShardUpsertRequest extends ShardRequest<ShardUpsertRequest, ShardUp
 
         /**
          * The URI the item was read from.
-         * It is only needed ony the sender to merge the write response into the related result object.
+         * It is only needed on the sender to merge the write response into the related result object.
          * DO NOT STREAM!
          */
         @Nullable
@@ -265,7 +265,7 @@ public class ShardUpsertRequest extends ShardRequest<ShardUpsertRequest, ShardUp
 
         /**
          * A possible failure while reading the item.
-         * It is only needed ony the sender to merge the write response into the related result object.
+         * It is only needed on the sender to create a possible summary of failed items.
          * DO NOT STREAM!
          */
         @Nullable
@@ -273,7 +273,8 @@ public class ShardUpsertRequest extends ShardRequest<ShardUpsertRequest, ShardUp
 
         /**
          * A possible failure processing the source URI.
-         * It is only needed ony the sender to merge the write response into the related result object.
+         * It is only needed on the sender to create a possible summary entry expressing that process a source uri
+         * failed completely e.g. due to file-not-found errors (no success/error count as no row was processed).
          * DO NOT STREAM!
          */
         @Nullable

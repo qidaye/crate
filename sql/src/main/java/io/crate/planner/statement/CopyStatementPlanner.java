@@ -25,7 +25,7 @@ package io.crate.planner.statement;
 import com.carrotsearch.hppc.cursors.ObjectCursor;
 import com.google.common.annotations.VisibleForTesting;
 import io.crate.analyze.CopyFromAnalyzedStatement;
-import io.crate.analyze.CopyFromReturnAnalyzedStatement;
+import io.crate.analyze.CopyFromReturnSummaryAnalyzedStatement;
 import io.crate.analyze.CopyToAnalyzedStatement;
 import io.crate.collections.Lists2;
 import io.crate.data.Row;
@@ -188,7 +188,7 @@ public final class CopyStatementPlanner {
         toCollect.add(rawOrDoc);
 
         List<? extends Symbol> projectionOutputs = AbstractIndexWriterProjection.OUTPUTS;
-        boolean isReturnSummary = copyFrom instanceof CopyFromReturnAnalyzedStatement;
+        boolean isReturnSummary = copyFrom instanceof CopyFromReturnSummaryAnalyzedStatement;
         InputColumn sourceUriSymbol = null;
         InputColumn sourceUriFailureSymbol = null;
         if (isReturnSummary) {
@@ -204,7 +204,7 @@ public final class CopyStatementPlanner {
                 RowGranularity.DOC,
                 DataTypes.STRING));
 
-            projectionOutputs = ((CopyFromReturnAnalyzedStatement) copyFrom).fields();
+            projectionOutputs = ((CopyFromReturnSummaryAnalyzedStatement) copyFrom).fields();
         }
 
         String[] excludes = partitionedByNames.size() > 0
@@ -286,12 +286,12 @@ public final class CopyStatementPlanner {
 
     /**
      * To generate the upsert request the following is required:
-     * <p>
-     * - relationName + partitionIdent / partitionValues
-     * -> to retrieve the indexName
-     * <p>
-     * - primaryKeys + clusteredBy  (+ indexName)
-     * -> to calculate the shardId
+     *
+     *  - relationName + partitionIdent / partitionValues
+     *      -> to retrieve the indexName
+     *
+     *  - primaryKeys + clusteredBy  (+ indexName)
+     *      -> to calculate the shardId
      */
     private static List<Symbol> getSymbolsRequiredForShardIdCalc(List<Reference> primaryKeyRefs,
                                                                  List<Reference> partitionedByRefs,
@@ -314,17 +314,18 @@ public final class CopyStatementPlanner {
     }
 
     /**
+     /**
      * Return RAW or DOC Reference:
-     * <p>
+     *
      * Copy from has two "modes" on how the json-object-lines are processed:
-     * <p>
+     *
      * 1: non-partitioned tables or partitioned tables with partition ident --> import into single es index
-     * -> collect raw source and import as is
-     * <p>
+     *    -> collect raw source and import as is
+     *
      * 2: partitioned table without partition ident
-     * -> collect document and partition by values
-     * -> exclude partitioned by columns from document
-     * -> insert into es index (partition determined by partition by value)
+     *    -> collect document and partition by values
+     *    -> exclude partitioned by columns from document
+     *    -> insert into es index (partition determined by partition by value)
      */
     private static Reference rawOrDoc(DocTableInfo table, String selectedPartitionIdent) {
         if (table.isPartitioned() && selectedPartitionIdent == null) {

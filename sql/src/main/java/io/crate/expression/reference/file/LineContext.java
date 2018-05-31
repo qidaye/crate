@@ -49,14 +49,15 @@ public class LineContext {
         return null;
     }
 
+    @Nullable
     Map<String, Object> sourceAsMap() {
         if (parsedSource == null) {
-            try {
-                parsedSource = XContentHelper.convertToMap(new BytesArray(rawSource), false, XContentType.JSON).v2();
-            } catch (NullPointerException e) {
-                return null;
-            } catch (ElasticsearchParseException | NotXContentException e) {
-                throw new RuntimeException("JSON parser error: " + e.getMessage(), e);
+            if (rawSource != null) {
+                try {
+                    parsedSource = XContentHelper.convertToMap(new BytesArray(rawSource), false, XContentType.JSON).v2();
+                } catch (ElasticsearchParseException | NotXContentException e) {
+                    throw new RuntimeException("JSON parser error: " + e.getMessage(), e);
+                }
             }
         }
         return parsedSource;
@@ -94,7 +95,7 @@ public class LineContext {
     }
 
     @Nullable
-    public String getCurrentUriFailure() {
+    String getCurrentUriFailure() {
         return currentUriFailure;
     }
 }

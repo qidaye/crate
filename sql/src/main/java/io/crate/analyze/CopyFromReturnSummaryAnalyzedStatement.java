@@ -43,7 +43,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.function.Predicate;
 
-public class CopyFromReturnAnalyzedStatement extends CopyFromAnalyzedStatement implements AnalyzedRelation {
+public class CopyFromReturnSummaryAnalyzedStatement extends CopyFromAnalyzedStatement implements AnalyzedRelation {
 
     private final List<Field> fields = ImmutableList.of(
         new Field(this, new ColumnIdent("node"), DataTypes.OBJECT),
@@ -55,12 +55,12 @@ public class CopyFromReturnAnalyzedStatement extends CopyFromAnalyzedStatement i
 
     private QualifiedName qualifiedName;
 
-    CopyFromReturnAnalyzedStatement(DocTableInfo table,
-                                    Settings settings,
-                                    Symbol uri,
-                                    @Nullable String partitionIdent,
-                                    Predicate<DiscoveryNode> nodePredicate,
-                                    FileUriCollectPhase.InputFormat inputFormat) {
+    CopyFromReturnSummaryAnalyzedStatement(DocTableInfo table,
+                                           Settings settings,
+                                           Symbol uri,
+                                           @Nullable String partitionIdent,
+                                           Predicate<DiscoveryNode> nodePredicate,
+                                           FileUriCollectPhase.InputFormat inputFormat) {
         super(table, settings, uri, partitionIdent, nodePredicate, inputFormat);
     }
 

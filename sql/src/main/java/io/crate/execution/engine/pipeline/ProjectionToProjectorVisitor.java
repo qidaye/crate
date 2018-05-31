@@ -97,6 +97,7 @@ import org.elasticsearch.threadpool.ThreadPool;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -343,24 +344,31 @@ public class ProjectionToProjectorVisitor
         Settings tableSettings = TableSettingsResolver.get(clusterService.state().getMetaData(),
             projection.tableIdent(), !projection.partitionedBySymbols().isEmpty());
 
+        InputColumn sourceUriSymbol = projection.sourceUriSymbol();
+        InputColumn sourceUriFailureSymbol = projection.sourceUriFailureSymbol();
 
-        InputFactory.Context<CollectExpression<Row, ?>> ctxSourceInfo = inputFactory.ctxForInputColumns();
+        // if both symbols are set, we're supposed to return a summary instead of just a affected row counter
+        boolean returnSummary = sourceUriSymbol != null && sourceUriFailureSymbol != null;
+
         Input<BytesRef> sourceUriInput;
         Input<String> sourceUriFailureInput;
         Collector<ShardUpsertRequestAndResponse, UpsertResults, Iterable<Row>> resultCollector;
-        InputColumn sourceUriSymbol = projection.sourceUriSymbol();
-        InputColumn sourceUriFailureSymbol = projection.sourceUriFailureSymbol();
-        // only take into account if both symbols are set
-        if (sourceUriSymbol != null && sourceUriFailureSymbol != null) {
+        List<? extends CollectExpression<Row, ?>> sourceInfoExpressions;
+
+        if (returnSummary) {
             resultCollector = UpsertResultCollectors.newSummaryCollector(clusterService.localNode());
+
+            InputFactory.Context<CollectExpression<Row, ?>> ctxSourceInfo = inputFactory.ctxForInputColumns();
             //noinspection unchecked
             sourceUriInput = (Input<BytesRef>) ctxSourceInfo.add(sourceUriSymbol);
             //noinspection unchecked
             sourceUriFailureInput = (Input<String>) ctxSourceInfo.add(sourceUriFailureSymbol);
+            sourceInfoExpressions = ctxSourceInfo.expressions();
         } else {
             resultCollector = UpsertResultCollectors.newRowCountCollector();
             sourceUriInput = () -> null;
             sourceUriFailureInput = () -> null;
+            sourceInfoExpressions = Collections.emptyList();
         }
 
         return new IndexWriterProjector(
@@ -383,7 +391,7 @@ public class ProjectionToProjectorVisitor
             sourceUriInput,
             sourceUriFailureInput,
             ctx.expressions(),
-            ctxSourceInfo.expressions(),
+            sourceInfoExpressions,
             projection.bulkActions(),
             projection.includes(),
             projection.excludes(),
