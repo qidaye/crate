@@ -205,4 +205,8 @@ public class JobsLogs {
     void updateJobsLog(LogSink<JobContextLog> sink) {
         jobsLog.set(sink);
     }
+
+    void resetMetricHistograms() {
+        histograms.clear();
+    }
 }
