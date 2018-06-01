@@ -717,7 +717,8 @@ public class CopyIntegrationTest extends SQLHttpIntegrationTest {
         ), "data2.json", target);
         tmpFileWithLines(Arrays.asList(
             "{\"id\": 4, \"ts\": 1496275200000}",
-            "{\"id\": 5, \"ts\": \"May\"}"              // <-- invalid timestamp
+            "{\"id\": 5, \"ts\": \"May\"}",              // <-- invalid timestamp
+            "{\"id\": 7, \"ts\": \"Juli\"}"              // <-- invalid timestamp
         ), "data3.json", target);
         tmpFileWithLines(Arrays.asList(
             "foo",                                      // <-- invalid json
@@ -730,9 +731,9 @@ public class CopyIntegrationTest extends SQLHttpIntegrationTest {
         // one of the first files should be processed without any error
         assertThat(result, containsString("| 2| 0| {}"));
         // one of the first files will have a duplicate key error
-        assertThat(result, containsString("| 1| 1| {DuplicateKeyException[A document with the same primary key exists already]; nested: VersionConflictEngineException[[default][2]: version conflict, document already exists (current version [1])]; ={count=1}}"));
+        assertThat(result, containsString("| 1| 1| {A document with the same primary key exists already={count=1}}"));
         // file `data3.json` has a invalid timestamp error
-        assertThat(result, containsString("data3.json| 1| 1| {MapperParsingException[failed to parse [ts]]; nested: IllegalArgumentException[Invalid format: \"May\"]; ={count=1}}"));
+        assertThat(result, containsString("data3.json| 1| 2| {failed to parse [ts]={count=2}}"));
         // file `data4.json` has an invalid json item entry
         assertThat(result, containsString("data4.json| 1| 1| {JSON parser error: "));
     }

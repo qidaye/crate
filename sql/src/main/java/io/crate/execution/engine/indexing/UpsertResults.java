@@ -28,6 +28,7 @@ import io.crate.data.RowN;
 import org.apache.lucene.util.BytesRef;
 
 import javax.annotation.Nullable;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -93,8 +94,9 @@ public class UpsertResults {
         }
     }
 
-    Iterable<Row> rowIterable() {
+    Iterable<Row> rowsIterable() {
         Stream<Row> s = results.entrySet().stream()
+            .sorted(Comparator.comparing(Map.Entry::getKey))
             .map(e -> {
                 Result r = e.getValue();
                 if (r.sourceUriFailure) {

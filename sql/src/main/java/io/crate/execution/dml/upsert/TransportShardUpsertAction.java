@@ -101,8 +101,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static io.crate.exceptions.Exceptions.userFriendlyMessage;
-
 /**
  * Realizes Upserts of tables which either results in an Insert or an Update.
  */
@@ -189,7 +187,7 @@ public class TransportShardUpsertAction extends TransportShardAction<ShardUpsert
                 shardResponse.add(location,
                     new ShardResponse.Failure(
                         item.id(),
-                        userFriendlyMessage(SQLExceptions.esToCrateException(e)),
+                        SQLExceptions.esToCrateException(e).getMessage(), // <-- convert to have nice errors per row
                         (e instanceof VersionConflictEngineException)));
             }
         }

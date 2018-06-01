@@ -126,7 +126,7 @@ public final class UpsertResultCollectors {
 
         @Override
         public Function<UpsertResults, Iterable<Row>> finisher() {
-            return UpsertResults::rowIterable;
+            return UpsertResults::rowsIterable;
         }
 
         @Override
