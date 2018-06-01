@@ -50,7 +50,6 @@ import io.crate.planner.statement.CopyStatementPlanner;
 import org.elasticsearch.common.collect.MapBuilder;
 
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -177,35 +176,48 @@ public class ExplainPlan implements Plan {
                                                                                    Collection<NodeOperation> nodeOperations) {
         Set<String> nodeIds = NodeOperationGrouper.groupByServer(nodeOperations).keySet();
 
-        if (nodeIds.size() > 0) {
-            CompletableFuture<Map<String, Map<String, Long>>> resultFuture = new CompletableFuture<>();
-            TransportCollectProfileOperation collectProfileOperation = getTransportCollectProfileOperation(executor, jobId);
+        CompletableFuture<Map<String, Map<String, Long>>> resultFuture = new CompletableFuture<>();
+        TransportCollectProfileOperation collectProfileOperation = getTransportCollectProfileOperation(executor, jobId);
 
-            ConcurrentHashMap<String, Map<String, Long>> mergedMap = new ConcurrentHashMap<>(nodeIds.size());
-            AtomicInteger counter = new AtomicInteger(nodeIds.size());
+        ConcurrentHashMap<String, Map<String, Long>> mergedMap = new ConcurrentHashMap<>(nodeIds.size());
+        boolean needsCollectLocal = !nodeIds.contains(executor.localNodeId());
 
-            for (String nodeId : nodeIds) {
-                collectProfileOperation.collect(nodeId)
-                    .whenComplete((map, throwable) -> {
-                        if (throwable == null) {
-                            mergedMap.put(nodeId, map);
-                            if (counter.decrementAndGet() == 0) {
-                                resultFuture.complete(mergedMap);
-                            }
-                        } else {
-                            resultFuture.completeExceptionally(throwable);
-                        }
-                    });
-            }
-            return resultFuture;
-        } else {
-            // Collect from local JobExecutionContext
-            return executor
+        AtomicInteger counter = new AtomicInteger(nodeIds.size());
+        if (needsCollectLocal) {
+            counter.incrementAndGet();
+        }
+
+        // Collect from remote JobExecutionContexts
+        for (String nodeId : nodeIds) {
+            collectProfileOperation.collect(nodeId)
+                .whenComplete(mergeResultsAndCompleteFuture(resultFuture, mergedMap, counter, nodeId));
+        }
+
+        // Also collect from local JobExecutionContext if needed
+        if (needsCollectLocal) {
+            executor
                 .transportActionProvider()
                 .transportCollectProfileNodeAction()
                 .collectExecutionTimesAndFinishContext(jobId)
-                .thenApply(timings -> Collections.singletonMap(executor.localNodeId(), timings));
+                .whenComplete(mergeResultsAndCompleteFuture(resultFuture, mergedMap, counter, executor.localNodeId()));
         }
+        return resultFuture;
+    }
+
+    private BiConsumer<Map<String, Long>, Throwable> mergeResultsAndCompleteFuture(CompletableFuture<Map<String, Map<String, Long>>> resultFuture,
+                                                                                   ConcurrentHashMap<String, Map<String, Long>> mergedMap,
+                                                                                   AtomicInteger counter,
+                                                                                   String nodeId) {
+        return (map, throwable) -> {
+            if (throwable == null) {
+                mergedMap.put(nodeId, map);
+                if (counter.decrementAndGet() == 0) {
+                    resultFuture.complete(mergedMap);
+                }
+            } else {
+                resultFuture.completeExceptionally(throwable);
+            }
+        };
     }
 
     @VisibleForTesting
