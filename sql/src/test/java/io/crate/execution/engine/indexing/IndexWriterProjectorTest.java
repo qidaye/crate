@@ -94,17 +94,14 @@ public class IndexWriterProjectorTest extends SQLTransportIntegrationTest {
             null,
             null,
             sourceInput,
-            () -> null,
-            () -> null,
             collectExpressions,
-            Collections.emptyList(),
             20,
             null,
             null,
             false,
             false,
             UUID.randomUUID(),
-            UpsertResultCollectors.newRowCountCollector()
+            UpsertResultContext.ROW_COUNT_INSTANCE
         );
 
         BatchIterator rowsIterator = InMemoryBatchIterator.of(IntStream.range(0, 100)

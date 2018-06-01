@@ -48,8 +48,6 @@ public class SourceIndexWriterProjection extends AbstractIndexWriterProjection {
     private final Boolean overwriteDuplicates;
     private final Reference rawSourceReference;
     private final InputColumn rawSourceSymbol;
-    private final InputColumn sourceUriSymbol;
-    private final InputColumn sourceUriFailureSymbol;
     private final List<? extends Symbol> outputs;
 
     @Nullable
@@ -57,6 +55,9 @@ public class SourceIndexWriterProjection extends AbstractIndexWriterProjection {
 
     @Nullable
     private String[] excludes;
+
+    @Nullable
+    private final ReturnSummarySymbols returnSummarySymbols;
 
     public SourceIndexWriterProjection(RelationName relationName,
                                        @Nullable String partitionIdent,
@@ -70,8 +71,7 @@ public class SourceIndexWriterProjection extends AbstractIndexWriterProjection {
                                        @Nullable String[] excludes,
                                        List<Symbol> idSymbols,
                                        @Nullable Symbol clusteredBySymbol,
-                                       @Nullable InputColumn sourceUriSymbol,
-                                       @Nullable InputColumn sourceUriFailureSymbol,
+                                       @Nullable ReturnSummarySymbols returnSummarySymbols,
                                        List<? extends Symbol> outputs,
                                        boolean autoCreateIndices) {
         super(relationName, partitionIdent, primaryKeys, clusteredByColumn, settings, idSymbols, autoCreateIndices);
@@ -81,8 +81,7 @@ public class SourceIndexWriterProjection extends AbstractIndexWriterProjection {
         this.partitionedBySymbols = partitionedBySymbols;
         this.clusteredBySymbol = clusteredBySymbol;
         this.rawSourceSymbol = rawSourcePtr;
-        this.sourceUriSymbol = sourceUriSymbol;
-        this.sourceUriFailureSymbol = sourceUriFailureSymbol;
+        this.returnSummarySymbols = returnSummarySymbols;
         this.outputs = outputs;
         overwriteDuplicates = settings.getAsBoolean(OVERWRITE_DUPLICATES, OVERWRITE_DUPLICATES_DEFAULT);
     }
@@ -93,11 +92,9 @@ public class SourceIndexWriterProjection extends AbstractIndexWriterProjection {
         rawSourceReference = Reference.fromStream(in);
         rawSourceSymbol = (InputColumn) Symbols.fromStream(in);
         if (in.readBoolean()) {
-            sourceUriSymbol = (InputColumn) Symbols.fromStream(in);
-            sourceUriFailureSymbol = (InputColumn) Symbols.fromStream(in);
+            returnSummarySymbols = new ReturnSummarySymbols(in);
         } else {
-            sourceUriSymbol = null;
-            sourceUriFailureSymbol = null;
+            returnSummarySymbols = null;
         }
 
         if (in.readBoolean()) {
@@ -114,7 +111,7 @@ public class SourceIndexWriterProjection extends AbstractIndexWriterProjection {
                 excludes[i] = in.readString();
             }
         }
-        this.outputs = super.outputs();
+        outputs = Symbols.listFromStream(in);
     }
 
     @Override
@@ -128,16 +125,6 @@ public class SourceIndexWriterProjection extends AbstractIndexWriterProjection {
 
     public Reference rawSourceReference() {
         return rawSourceReference;
-    }
-
-    @Nullable
-    public InputColumn sourceUriSymbol() {
-        return sourceUriSymbol;
-    }
-
-    @Nullable
-    public InputColumn sourceUriFailureSymbol() {
-        return sourceUriFailureSymbol;
     }
 
     @Nullable
@@ -169,15 +156,14 @@ public class SourceIndexWriterProjection extends AbstractIndexWriterProjection {
         return Objects.equals(overwriteDuplicates, that.overwriteDuplicates) &&
                Objects.equals(rawSourceReference, that.rawSourceReference) &&
                Objects.equals(rawSourceSymbol, that.rawSourceSymbol) &&
-               Objects.equals(sourceUriSymbol, that.sourceUriSymbol) &&
-               Objects.equals(sourceUriFailureSymbol, that.sourceUriFailureSymbol) &&
+               Objects.equals(returnSummarySymbols, that.returnSummarySymbols) &&
                Arrays.equals(includes, that.includes) &&
                Arrays.equals(excludes, that.excludes);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(super.hashCode(), overwriteDuplicates, rawSourceReference, rawSourceSymbol, sourceUriSymbol, sourceUriFailureSymbol);
+        int result = Objects.hash(super.hashCode(), overwriteDuplicates, rawSourceReference, rawSourceSymbol, returnSummarySymbols);
         result = 31 * result + Arrays.hashCode(includes);
         result = 31 * result + Arrays.hashCode(excludes);
         return result;
@@ -190,12 +176,12 @@ public class SourceIndexWriterProjection extends AbstractIndexWriterProjection {
         out.writeBoolean(overwriteDuplicates);
         Reference.toStream(rawSourceReference, out);
         Symbols.toStream(rawSourceSymbol, out);
-        if (sourceUriSymbol == null || sourceUriFailureSymbol == null) {
+
+        if (returnSummarySymbols == null) {
             out.writeBoolean(false);
         } else {
             out.writeBoolean(true);
-            Symbols.toStream(sourceUriSymbol, out);
-            Symbols.toStream(sourceUriFailureSymbol, out);
+            returnSummarySymbols.writeTo(out);
         }
 
         if (includes == null) {
@@ -216,9 +202,44 @@ public class SourceIndexWriterProjection extends AbstractIndexWriterProjection {
                 out.writeString(exclude);
             }
         }
+        Symbols.toStream(outputs, out);
     }
 
     public boolean overwriteDuplicates() {
         return overwriteDuplicates;
+    }
+
+    @Nullable
+    public ReturnSummarySymbols returnSummarySymbols() {
+        return returnSummarySymbols;
+    }
+
+    public static class ReturnSummarySymbols {
+        private final InputColumn sourceUriSymbol;
+        private final InputColumn sourceUriFailureSymbol;
+
+        public ReturnSummarySymbols(InputColumn sourceUriSymbol, InputColumn sourceUriFailureSymbol) {
+            this.sourceUriSymbol = sourceUriSymbol;
+            this.sourceUriFailureSymbol = sourceUriFailureSymbol;
+        }
+
+        ReturnSummarySymbols(StreamInput in) throws IOException {
+            sourceUriSymbol = (InputColumn) Symbols.fromStream(in);
+            sourceUriFailureSymbol = (InputColumn) Symbols.fromStream(in);
+        }
+
+        public void writeTo(StreamOutput out) throws IOException {
+            Symbols.toStream(sourceUriSymbol, out);
+            Symbols.toStream(sourceUriFailureSymbol, out);
+        }
+
+        public InputColumn sourceUriSymbol() {
+            return sourceUriSymbol;
+        }
+
+        public InputColumn sourceUriFailureSymbol() {
+            return sourceUriFailureSymbol;
+        }
+
     }
 }

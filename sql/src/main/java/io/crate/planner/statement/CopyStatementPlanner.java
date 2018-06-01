@@ -189,22 +189,24 @@ public final class CopyStatementPlanner {
 
         List<? extends Symbol> projectionOutputs = AbstractIndexWriterProjection.OUTPUTS;
         boolean isReturnSummary = copyFrom instanceof CopyFromReturnSummaryAnalyzedStatement;
-        InputColumn sourceUriSymbol = null;
-        InputColumn sourceUriFailureSymbol = null;
+        SourceIndexWriterProjection.ReturnSummarySymbols returnSummarySymbols = null;
         if (isReturnSummary) {
-            sourceUriSymbol = new InputColumn(toCollect.size(), DataTypes.STRING);
+            final InputColumn sourceUriSymbol = new InputColumn(toCollect.size(), DataTypes.STRING);
             toCollect.add(new Reference(
                 new ReferenceIdent(table.ident(), new ColumnIdent(CurrentUriLineExpression.COLUMN_NAME)),
                 RowGranularity.DOC,
                 DataTypes.STRING));
 
-            sourceUriFailureSymbol = new InputColumn(toCollect.size(), DataTypes.STRING);
+            final InputColumn sourceUriFailureSymbol = new InputColumn(toCollect.size(), DataTypes.STRING);
             toCollect.add(new Reference(
                 new ReferenceIdent(table.ident(), new ColumnIdent(UriFailureExpression.COLUMN_NAME)),
                 RowGranularity.DOC,
                 DataTypes.STRING));
 
-            projectionOutputs = ((CopyFromReturnSummaryAnalyzedStatement) copyFrom).fields();
+            List<? extends Symbol> fields = ((CopyFromReturnSummaryAnalyzedStatement) copyFrom).fields();
+            projectionOutputs = InputColumns.create(fields, new InputColumns.SourceSymbols(fields));
+
+            returnSummarySymbols = new SourceIndexWriterProjection.ReturnSummarySymbols(sourceUriSymbol, sourceUriFailureSymbol);
         }
 
         String[] excludes = partitionedByNames.size() > 0
@@ -228,8 +230,7 @@ public final class CopyStatementPlanner {
             excludes,
             InputColumns.create(primaryKeyRefs, sourceSymbols),
             clusteredByInputCol,
-            sourceUriSymbol,
-            sourceUriFailureSymbol,
+            returnSummarySymbols,
             projectionOutputs,
             table.isPartitioned() // autoCreateIndices
         );

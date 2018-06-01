@@ -61,10 +61,8 @@ import io.crate.execution.engine.indexing.DMLProjector;
 import io.crate.execution.engine.indexing.IndexNameResolver;
 import io.crate.execution.engine.indexing.IndexWriterProjector;
 import io.crate.execution.engine.indexing.ShardDMLExecutor;
-import io.crate.execution.engine.indexing.ShardUpsertRequestAndResponse;
 import io.crate.execution.engine.indexing.ShardingUpsertExecutor;
-import io.crate.execution.engine.indexing.UpsertResultCollectors;
-import io.crate.execution.engine.indexing.UpsertResults;
+import io.crate.execution.engine.indexing.UpsertResultContext;
 import io.crate.execution.engine.sort.OrderingByPosition;
 import io.crate.execution.engine.sort.SortingProjector;
 import io.crate.execution.engine.sort.SortingTopNProjector;
@@ -74,7 +72,6 @@ import io.crate.expression.RowFilter;
 import io.crate.expression.eval.EvaluatingNormalizer;
 import io.crate.expression.reference.StaticTableDefinition;
 import io.crate.expression.reference.sys.SysRowUpdater;
-import io.crate.expression.symbol.InputColumn;
 import io.crate.expression.symbol.Literal;
 import io.crate.expression.symbol.Symbol;
 import io.crate.expression.symbol.Symbols;
@@ -86,7 +83,6 @@ import io.crate.metadata.RelationName;
 import io.crate.metadata.RowCollectExpression;
 import io.crate.metadata.TransactionContext;
 import io.crate.types.StringType;
-import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.Version;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.settings.Settings;
@@ -97,7 +93,6 @@ import org.elasticsearch.threadpool.ThreadPool;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -106,7 +101,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
-import java.util.stream.Collector;
 
 public class ProjectionToProjectorVisitor
     extends ProjectionVisitor<ProjectionToProjectorVisitor.Context, Projector> implements ProjectorFactory {
@@ -344,31 +338,13 @@ public class ProjectionToProjectorVisitor
         Settings tableSettings = TableSettingsResolver.get(clusterService.state().getMetaData(),
             projection.tableIdent(), !projection.partitionedBySymbols().isEmpty());
 
-        InputColumn sourceUriSymbol = projection.sourceUriSymbol();
-        InputColumn sourceUriFailureSymbol = projection.sourceUriFailureSymbol();
-
-        // if both symbols are set, we're supposed to return a summary instead of just a affected row counter
-        boolean returnSummary = sourceUriSymbol != null && sourceUriFailureSymbol != null;
-
-        Input<BytesRef> sourceUriInput;
-        Input<String> sourceUriFailureInput;
-        Collector<ShardUpsertRequestAndResponse, UpsertResults, Iterable<Row>> resultCollector;
-        List<? extends CollectExpression<Row, ?>> sourceInfoExpressions;
-
-        if (returnSummary) {
-            resultCollector = UpsertResultCollectors.newSummaryCollector(clusterService.localNode());
-
-            InputFactory.Context<CollectExpression<Row, ?>> ctxSourceInfo = inputFactory.ctxForInputColumns();
-            //noinspection unchecked
-            sourceUriInput = (Input<BytesRef>) ctxSourceInfo.add(sourceUriSymbol);
-            //noinspection unchecked
-            sourceUriFailureInput = (Input<String>) ctxSourceInfo.add(sourceUriFailureSymbol);
-            sourceInfoExpressions = ctxSourceInfo.expressions();
-        } else {
-            resultCollector = UpsertResultCollectors.newRowCountCollector();
-            sourceUriInput = () -> null;
-            sourceUriFailureInput = () -> null;
-            sourceInfoExpressions = Collections.emptyList();
+        UpsertResultContext upsertResultContext = UpsertResultContext.ROW_COUNT_INSTANCE;
+        SourceIndexWriterProjection.ReturnSummarySymbols returnSummarySymbols = projection.returnSummarySymbols();
+        if (returnSummarySymbols != null) {
+            upsertResultContext = UpsertResultContext.forReturnSummary(
+                returnSummarySymbols,
+                clusterService.localNode(),
+                inputFactory);
         }
 
         return new IndexWriterProjector(
@@ -388,17 +364,14 @@ public class ProjectionToProjectorVisitor
             projection.clusteredBy(),
             projection.clusteredByIdent(),
             sourceInput,
-            sourceUriInput,
-            sourceUriFailureInput,
             ctx.expressions(),
-            sourceInfoExpressions,
             projection.bulkActions(),
             projection.includes(),
             projection.excludes(),
             projection.autoCreateIndices(),
             projection.overwriteDuplicates(),
             context.jobId,
-            resultCollector
+            upsertResultContext
         );
     }
 

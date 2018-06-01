@@ -26,7 +26,6 @@ import io.crate.action.FutureActionListener;
 import io.crate.action.LimitedExponentialBackoff;
 import io.crate.data.BatchIterator;
 import io.crate.data.BatchIterators;
-import io.crate.data.Input;
 import io.crate.data.Row;
 import io.crate.execution.dml.ShardResponse;
 import io.crate.execution.dml.upsert.ShardUpsertRequest;
@@ -99,18 +98,14 @@ public class ShardingUpsertExecutor
                            UUID jobId,
                            RowShardResolver rowShardResolver,
                            Function<String, ShardUpsertRequest.Item> itemFactory,
-                           Function<String, ShardUpsertRequest.Item> itemFailureFactory,
-                           Function<String, ShardUpsertRequest.Item> sourceUriFailureFactory,
                            Function<ShardId, ShardUpsertRequest> requestFactory,
                            List<? extends CollectExpression<Row, ?>> expressions,
-                           List<? extends CollectExpression<Row, ?>> metaExpressions,
-                           Input<String> sourceUriFailureInput,
                            Supplier<String> indexNameResolver,
                            boolean autoCreateIndices,
                            BulkRequestExecutor<ShardUpsertRequest> requestExecutor,
                            TransportCreatePartitionsAction createPartitionsAction,
                            Settings tableSettings,
-                           Collector<ShardUpsertRequestAndResponse, UpsertResults, Iterable<Row>> resultCollector) {
+                           UpsertResultContext upsertResultContext) {
         this.nodeJobsCounter = nodeJobsCounter;
         this.scheduler = scheduler;
         this.executor = executor;
@@ -124,16 +119,16 @@ public class ShardingUpsertExecutor
             rowShardResolver,
             indexNameResolver,
             expressions,
-            metaExpressions,
+            upsertResultContext.getSourceInfoExpressions(),
             itemFactory,
-            itemFailureFactory,
-            sourceUriFailureFactory,
-            sourceUriFailureInput,
+            upsertResultContext.getItemFailureFactory(),
+            upsertResultContext.getSourceUriFailureFactory(),
+            upsertResultContext.getSourceUriFailureInput(),
             autoCreateIndices
         );
         bulkShardCreationLimiter = new BulkShardCreationLimiter<>(tableSettings,
             clusterService.state().nodes().getDataNodes().size());
-        this.resultCollector = resultCollector;
+        this.resultCollector = upsertResultContext.getResultCollector();
     }
 
     public CompletableFuture<UpsertResults> execute(ShardedRequests<ShardUpsertRequest, ShardUpsertRequest.Item> requests) {
