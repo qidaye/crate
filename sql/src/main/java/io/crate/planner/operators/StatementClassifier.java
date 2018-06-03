@@ -29,6 +29,24 @@ import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 
+/**
+ * Utility to classify SQL statements based on their {@link Plan}.
+ *
+ * A classification consists of the {@link io.crate.planner.Plan.StatementType} that is provided by the {@link Plan}
+ * implementation, such as DDL, SELECT, INSERT, UPDATE, DELETE, etc., and in case of a SELECT statement, additional
+ * labels. These labels are a set of {@link LogicalPlan}s that the statement plan consists of, for example:
+ *
+ * <pre>
+ *     SELECT * FROM users ORDER BY age DESC;
+ * </pre>
+ *
+ * Would result in a classification of:
+ *
+ * <pre>
+ *     type = SELECT
+ *     labels = [FetchOrEval, Collect, Order]
+ * </pre>
+ */
 public class StatementClassifier {
 
     private static final Visitor CLASS_EXTRACTOR = new Visitor();

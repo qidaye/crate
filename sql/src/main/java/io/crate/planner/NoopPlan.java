@@ -40,7 +40,7 @@ public final class NoopPlan implements Plan {
 
     @Override
     public StatementType type() {
-        return StatementType.MANAGEMENT;
+        return StatementType.UNDEFINED;
     }
 
     @Override

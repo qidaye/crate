@@ -64,6 +64,9 @@ import java.util.stream.Collectors;
 @ThreadSafe
 public class JobsLogs {
 
+    private static final long HISTOGRAM_HIGHEST_TRACKABLE_VALUE = TimeUnit.MINUTES.toMillis(10);
+    private static final int HISTOGRAM_NUMBER_OF_SIGNIFICANT_VALUE_DIGITS = 3;
+
     private final Map<UUID, JobContext> jobsTable = new ConcurrentHashMap<>();
     private final Map<Tuple<Integer, UUID>, OperationContext> operationsTable = new ConcurrentHashMap<>();
 
@@ -129,7 +132,7 @@ public class JobsLogs {
         assert classification != null : "A job must have a classificiation";
         ConcurrentHistogram histogram = histograms.get(classification);
         if (histogram == null) {
-            histogram = new ConcurrentHistogram(TimeUnit.MINUTES.toMillis(10), 3);
+            histogram = new ConcurrentHistogram(HISTOGRAM_HIGHEST_TRACKABLE_VALUE, HISTOGRAM_NUMBER_OF_SIGNIFICANT_VALUE_DIGITS);
             histograms.put(classification, histogram);
         }
         histogram.recordValue(log.ended() - log.started());
